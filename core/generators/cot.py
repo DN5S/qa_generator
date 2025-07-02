@@ -14,7 +14,7 @@ class CoTGenerator(DatasetGenerator):
 
     @property
     def _get_prompt_path(self) -> Path:
-        return self.settings.TEMPLATE_DIRECTORY / "cot" / "prompt.md"
+        return self.settings.PROMPTS_DIRECTORY / "cot" / "prompt.md"
 
     @property
     def _get_schema_template_name(self) -> str:
