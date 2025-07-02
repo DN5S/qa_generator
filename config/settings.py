@@ -2,12 +2,26 @@
 
 from enum import Enum
 from pathlib import Path
+from typing import Final
+
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+GEMINI_FLASH_MODEL: Final[str] = "gemini-2.0-flash"
+GEMINI_PRO_MODEL: Final[str] = "gemini-1.5-pro"
+
 class GeminiModels(str, Enum):
-    FLASH = 'gemini-2.0-flash'
-    PRO = 'gemini-1.5-pro'
+    FLASH = GEMINI_FLASH_MODEL
+    PRO = GEMINI_PRO_MODEL
+
+class PathSettings(BaseSettings):
+    BASE_DIR: Path = Path(__file__).resolve().parent.parent
+    DATA_DIRECTORY: Path = BASE_DIR / "data/input"
+    PROMPTS_DIRECTORY: Path = BASE_DIR / "prompts"
+    OUTPUT_BASE_DIRECTORY: Path = BASE_DIR / "data/output"
+
+    QA_FILENAME_TEMPLATE: str = "{stem}_qa.json"
+    BROKEN_FILENAME_TEMPLATE: str = "{stem}_qa_broken.txt"
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
@@ -26,10 +40,7 @@ class Settings(BaseSettings):
                                          description="API 응답이 유효하지 않은 JSON일 경우, LLM에게 자가 수정을 요청하는 기능을 활성화한다.")
 
     # 경로 설정
-    BASE_DIR: Path = Path(__file__).resolve().parent.parent
-    DATA_DIRECTORY: Path = BASE_DIR / "data/input"
-    PROMPTS_DIRECTORY: Path = BASE_DIR / "prompts"
-    OUTPUT_BASE_DIRECTORY: Path = BASE_DIR / "data/output"
+    paths: PathSettings = PathSettings()
 
 # 애플리케이션 전역에서 사용될 설정(Settings) 클래스의 싱글톤 인스턴스.
 settings = Settings()

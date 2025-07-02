@@ -6,83 +6,86 @@ import importlib
 import inspect
 import logging
 import pkgutil
-from typing import Dict, Type
+from typing import Dict, Type, TypeAlias
 
 from config.settings import settings
-from core.generators.base import DatasetGenerator
-import core.generators
+from core.generators.dataset_generator import DatasetGenerator
+from core.handlers.file_handler import FileHandler
+from core.handlers.llm.base_handler import BaseLLMHandler
+
+GeneratorClass: TypeAlias = Type[DatasetGenerator]
+LLMHandlerClass: TypeAlias = Type[BaseLLMHandler]
 
 def setup_logging() -> None:
 	"""
 	애플리케이션의 로깅 시스템을 초기화한다.
 	로그는 파일(processing.log)과 콘솔 스트림으로 동시에 출력된다.
 	"""
-	log_format = '%(asctime)s - %(levelname)s - [%(funcName)s:%(lineno)d] - %(message)s'
-	# root logger의 기존 핸들러를 모두 제거하여 중복 출력을 방지한다.
-	for handler in logging.root.handlers[:]:
-		logging.root.removeHandler(handler)
-
+	log_format = '%(asctime)s - %(levelname)s - [%(name)s:%(lineno)d] - %(message)s'
 	logging.basicConfig(
 		level=logging.INFO,
 		format=log_format,
 		handlers=[
 			logging.FileHandler("processing.log", mode='w', encoding='utf-8'),
 			logging.StreamHandler()
-		]
+		],
+		force=True  # 기존 핸들러를 강제로 대체하여 중복 로깅 방지
 	)
 	logging.info("========================================")
 	logging.info("Logging system initialized.")
 	logging.info("========================================")
 
-def setup_environment() -> None:
-	"""
-	애플리케이션 실행에 필요한 파일 시스템 환경을 준비한다.
-	결과물(output)을 저장할 디렉터리가 존재하지 않으면 생성한다.
-	"""
-	logging.info("Preparing application environment...")
-	try:
-		logging.info("Environment setup is delegated to generators.")
-	except OSError as e:
-		logging.critical(f"FATAL: Failed to create output directories. Check permissions. Error: {e}",
-						 exc_info=True)
-		raise SystemExit(1)
 
-def discover_generators() -> Dict[str, Type[DatasetGenerator]]:
+def discover_modules(package_path, package_name, base_class, suffix) -> Dict[str, Type]:
 	"""
-	core.generators 패키지를 동적으로 탐색하여 사용 가능한 모든 제너레이터 클래스를 찾아 매핑한다.
+	지정된 패키지에서 특정 베이스 클래스를 상속하는 모듈들을 동적으로 탐색한다.
+
+	Args:
+		package_path: 탐색할 패키지의 경로.
+		package_name: 패키지의 이름.
+		base_class: 찾아야 할 부모 클래스.
+		suffix: 클래스 이름에서 제거할 접미사.
+
+	Returns:
+		{키: 클래스} 형태의 딕셔너리.
 	"""
-	generator_map = {}
-	package = core.generators
+	module_map: Dict[str, Type] = {}
 
-	for module_info in pkgutil.walk_packages(package.__path__, package.__name__ + "."):
-		if module_info.name.endswith('.base'):
-			continue
+	for module_info in pkgutil.walk_packages(package_path, f"{package_name}."):
+		try:
+			module = importlib.import_module(module_info.name)
+			for name, obj in inspect.getmembers(module, inspect.isclass):
+				if issubclass(obj, base_class) and obj is not base_class:
+					key = name.replace(suffix, "").lower()
+					module_map[key] = obj
+					logging.info(f"Discovered {base_class.__name__}: '{key}' -> {name}")
+		except Exception as e:
+			logging.error(f"Failed to import or inspect module {module_info.name}: {e}")
 
-		# importlib.import_module을 사용하여 모듈을 명시적으로 임포트한다.
-		module = importlib.import_module(module_info.name)
-		for name, obj in inspect.getmembers(module, inspect.isclass):
-			if issubclass(obj, DatasetGenerator) and obj is not DatasetGenerator:
-				key = name.replace("Generator", "").lower()
-				generator_map[key] = obj
-				logging.info(f"Discovered generator: '{key}' -> {name}")
+	if not module_map:
+		raise ImportError(f"No modules found for {base_class.__name__} in '{package_name}'.")
 
-	if not generator_map:
-		raise ImportError("No generator classes found in 'core/generators' package.")
-	return generator_map
+	return module_map
 
-def setup_arg_parser(choices: list) -> argparse.ArgumentParser:
-	"""
-	스크립트 실행을 위한 명령행 인터페이스(CLI) 인자를 설정하고 반환한다.
-	"""
+def setup_arg_parser(gen_choices: list, llm_choices: list) -> argparse.ArgumentParser:
+	"""스크립트 실행을 위한 명령행 인터페이스(CLI) 인자를 설정하고 반환한다."""
 	parser = argparse.ArgumentParser(
 		description="A robust tool for generating AI-based QA datasets from Markdown documents."
 	)
 	parser.add_argument(
 		"--type",
 		type=str,
-		choices=choices,
+		choices=gen_choices,
 		required=True,
 		help="Type of dataset to generate. Discovered: %(choices)s"
+	)
+	parser.add_argument(
+		"--llm",
+		type=str,
+		choices=llm_choices,
+		default=llm_choices[0] if llm_choices else None, # 첫 번째 발견된 핸들러를 기본값으로
+		required=True,
+		help="LLM handler to use for generation. Discovered: %(choices)s"
 	)
 	parser.add_argument(
 		"--num-files",
@@ -100,27 +103,51 @@ def setup_arg_parser(choices: list) -> argparse.ArgumentParser:
 
 async def main() -> None:
 	"""
-	메인 실행 함수.
-	모든 컴포넌트를 조립하고 데이터 생성 파이프라인을 실행한다.
+	메인 실행 함수. 의존성을 생성 및 주입하고, 전체 파이프라인을 실행한다.
 	"""
 	setup_logging()
 
 	try:
-		generator_map = discover_generators()
-		parser = setup_arg_parser(list(generator_map.keys()))
+		# --- 1. 동적 탐색: 사용 가능한 모든 전문가들을 찾아낸다 ---
+		import core.generators
+		import core.handlers.llm
+
+		generator_map = discover_modules(core.generators.__path__, core.generators.__name__, DatasetGenerator,
+		                                 "Generator")
+		llm_handler_map = discover_modules(core.handlers.llm.__path__, core.handlers.llm.__name__, BaseLLMHandler,
+		                                   "Handler")
+
+		# --- 2. 명령행 인자 설정 및 파싱 ---
+		parser = setup_arg_parser(list(generator_map.keys()), list(llm_handler_map.keys()))
 		args = parser.parse_args()
 
 		if args.self_correction:
 			settings.ENABLE_SELF_CORRECTION = True
+			logging.info("Self-correction mode ENABLED by command-line argument.")
 
-		logging.info(f"Script execution started. Generation type: '{args.type}'")
-		logging.info(f"Self-Correction Mode: {'ENABLED' if settings.ENABLE_SELF_CORRECTION else 'DISABLED'}")
+		logging.info(f"Script execution started. Generation type: '{args.type}', LLM Handler: '{args.llm}'")
 
+		# --- 3. 의존성 생성 (Dependency Creation) ---
+		file_handler = FileHandler(
+			data_directory=settings.paths.DATA_DIRECTORY,
+			output_base_directory=settings.paths.OUTPUT_BASE_DIRECTORY
+		)
+
+		llm_handler_class = llm_handler_map[args.llm]
+		llm_handler: BaseLLMHandler = llm_handler_class(settings)
+
+		# --- 4. 의존성 주입 (Dependency Injection) ---
 		generator_class = generator_map[args.type]
-		generator = generator_class(settings)
+		generator = generator_class(
+			settings=settings,
+			file_handler=file_handler,
+			llm_handler=llm_handler
+		)
+
+		# --- 5. 파이프라인 실행 ---
 		await generator.run(num_files=args.num_files)
 
-		logging.info("All tasks completed successfully.")
+		logging.info("All tasks completed successfully. Shutting down.")
 
 	except (ImportError, ValueError, FileNotFoundError) as e:
 		logging.critical(f"Initialization failed: {e}", exc_info=True)
