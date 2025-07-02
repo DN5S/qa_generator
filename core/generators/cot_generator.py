@@ -1,6 +1,6 @@
-# core/generators/cot.py
+# core/generators/cot_generator.py
 
-from core.generators.base import DatasetGenerator
+from core.generators.dataset_generator import DatasetGenerator
 
 
 class CoTGenerator(DatasetGenerator):

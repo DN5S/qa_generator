@@ -1,6 +1,6 @@
 # core/generators/multiturn.py
 
-from core.generators.base import DatasetGenerator
+from core.generators.dataset_generator import DatasetGenerator
 
 class MultiTurnGenerator(DatasetGenerator):
     """

@@ -1,6 +1,6 @@
 # core/generators/__init__.py
 
-from .base import DatasetGenerator
-from .single_turn import SingleTurnGenerator
-from .multi_turn import MultiTurnGenerator
-from .cot import CoTGenerator
+from .dataset_generator import DatasetGenerator
+from .single_turn_generator import SingleTurnGenerator
+from .multi_turn_generator import MultiTurnGenerator
+from .cot_generator import CoTGenerator
