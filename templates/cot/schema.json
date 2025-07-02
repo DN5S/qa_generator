@@ -1,0 +1,22 @@
+{
+  "info": {
+    "case_name": "string or null",
+    "case_no": "string or null",
+    "resolution_no": "string or null",
+    "accused": "string or null",
+    "resolution_date": "YYYY-MM-DD or null"
+  },
+  "topic": "string",
+  "qa_pairs": [
+    {
+      "question": "string",
+      "thought": [
+        "1단계: 질문 분해...",
+        "2단계: 탐색 계획 및 실행...",
+        "3단계: 정보 연결 및 추론...",
+        "4단계: 답변 초안 구성..."
+      ],
+      "answer": "string (결론 + 상세설명 + 근거 인용 구조)"
+    }
+  ]
+}
