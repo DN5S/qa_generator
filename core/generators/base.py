@@ -1,11 +1,13 @@
 # core/generators/base.py
 
 import asyncio
+import inspect
 import json
 import logging
+import re
 from pathlib import Path
-from abc import ABC, abstractmethod
-from typing import Type, Union, Optional, List
+from abc import ABC
+from typing import Type, Union, Optional, List, Dict
 
 from pydantic import ValidationError
 from json_repair import repair_json
@@ -15,21 +17,55 @@ from google.genai.types import GenerateContentConfig
 from config.settings import Settings
 from core.client import get_gemini_client
 from core.prompt_manager import PromptTemplateManager
-from schemas.qa_models import ValidationSchema
+import schemas.datasets as dataset_schemas
+from schemas.datasets import ValidationSchema
 
 
 class DatasetGenerator(ABC):
 	"""
 	데이터셋 생성기를 위한 추상 베이스 클래스(ABC).
 	모든 구체적인 생성기 클래스가 상속받아야 하는 공통 인터페이스와 핵심 로직을 정의한다.
+	동적 스키마 탐색과 경로 구성을 통해 자식 클래스의 중복을 원천적으로 제거한다.
 	"""
+	GENERATOR_TYPE: str = ""
+	_validation_schema_map: Dict[str, Type[ValidationSchema]] = {}
 
 	def __init__(self, settings: Settings):
+		if not self.GENERATOR_TYPE:
+			raise NotImplementedError(f"{self.__class__.__name__} must define a GENERATOR_TYPE.")
+
 		self.settings = settings
 		self.client: genai.client.Client = get_gemini_client()
+		self.template_manager = PromptTemplateManager(self.settings.PROMPTS_DIRECTORY)
+
+		# 클래스가 처음 인스턴스화될 때만 스키마 맵을 동적으로 빌드한다.
+		if not self.__class__._validation_schema_map:
+			self.__class__._build_validation_schema_map()
+
 		self._get_output_directory.mkdir(parents=True, exist_ok=True)
 		self.semaphore = asyncio.Semaphore(self.settings.MAX_CONCURRENT_REQUESTS)
-		self.template_manager = PromptTemplateManager(self.settings.PROMPTS_DIRECTORY)
+
+	@classmethod
+	def _build_validation_schema_map(cls) -> None:
+		"""
+		schemas.datasets 모듈을 탐색하여 명명 규칙에 따라
+		제너레이터 타입과 검증 스키마를 동적으로 매핑한다.
+		"""
+		logging.info("  Building validation schema map dynamically...")
+
+		for name, schema_class in inspect.getmembers(dataset_schemas, inspect.isclass):
+			if issubclass(schema_class, ValidationSchema) and name != 'ValidationSchema':
+				# 예: 'SingleTurnQA' -> 'singleturn'
+				# 1. '_qa' 또는 'QA' 접미사 제거 -> 'SingleTurn'
+				base_name = name.removesuffix("QA").removesuffix("_qa")
+				# 2. 소문자로 변환 -> 'singleturn'
+				generator_type_key = base_name.lower()
+
+				cls._validation_schema_map[generator_type_key] = schema_class
+				logging.info(f"  Discovered and mapped schema: '{generator_type_key}' -> {name}")
+
+		if not cls._validation_schema_map:
+			raise ImportError("No validation schemas found in 'schemas/datasets.py'.")
 
 	def _assemble_prompt(self, **kwargs) -> str:
 		"""
@@ -50,37 +86,33 @@ class DatasetGenerator(ABC):
 		main_template = self.template_manager.get_template(main_template_key)
 		return main_template.format(**format_args)
 
-	# --- 자식 클래스가 반드시 구현해야 할 properties ↓ ---
 
 	@property
-	@abstractmethod
 	def _get_prompt_path(self) -> Path:
 		"""프롬프트 템플릿 파일의 경로를 반환해야 한다."""
-		raise NotImplementedError
+		return self.settings.PROMPTS_DIRECTORY / self.GENERATOR_TYPE / "prompt.md"
 
 	@property
-	@abstractmethod
 	def _get_output_directory(self) -> Path:
 		"""출력 디렉터리의 경로를 반환해야 한다."""
-		raise NotImplementedError
-
-	@abstractmethod
-	def _get_validation_schema(self) -> Type[ValidationSchema]:
-		"""API 응답 검증에 사용할 Pydantic 스키마를 반환해야 한다."""
-		raise NotImplementedError
+		return self.settings.OUTPUT_BASE_DIRECTORY / self.GENERATOR_TYPE
 
 	@property
-	@abstractmethod
 	def _get_schema_template_name(self) -> str:
 		"""사용할 JSON 스키마 템플릿 파일명을 반환한다."""
-		raise NotImplementedError
+		return "schema.json"
 
 	@property
-	@abstractmethod
 	def _get_required_partials(self) -> List[str]:
-		raise NotImplementedError
+		"""모든 제너레이터가 공통으로 사용하는 partial 템플릿 목록."""
+		return ['system_prompt', 'metadata_rules', 'qa_answer_rules']
 
-	# --- 자식 클래스가 반드시 구현해야 할 properties ↑ ---
+	def _get_validation_schema(self) -> Type[ValidationSchema]:
+		"""동적으로 빌드된 맵에서 현재 제너레이터에 맞는 검증 스키마를 반환한다."""
+		schema = self._validation_schema_map.get(self.GENERATOR_TYPE)
+		if not schema:
+			raise ValueError(f"No validation schema found for GENERATOR_TYPE '{self.GENERATOR_TYPE}'.")
+		return schema
 
 	def _get_extra_template_args(self) -> dict:
 		"""

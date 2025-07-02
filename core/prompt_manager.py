@@ -24,7 +24,7 @@ class PromptTemplateManager:
         """지정된 디렉터리와 하위 디렉터리에서 모든 템플릿 파일을 로드한다."""
         template_files = [p for p in base_path.rglob('*') if p.is_file() and p.suffix in ['.md', '.txt', '.json']]
         for file_path in template_files:
-            # key를 'single_turn/prompt.md' 와 같은 상대 경로로 만든다.
+            # key를 'singleturn/prompt.md' 와 같은 상대 경로로 만든다.
             key = file_path.relative_to(base_path).as_posix()
             try:
                 self._templates[key] = file_path.read_text(encoding='utf-8')
