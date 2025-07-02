@@ -32,9 +32,8 @@ class BaseQASet(ValidationSchema, Generic[QAItem]):
     conversation_id: UUID = Field(default_factory=uuid4, description="QA 세트를 식별하기 위한 고유 UUID")
     topic: str = Field(..., description="QA 세트의 전체 주제.")
     info: Info = Field(..., description="문서의 메타데이터 정보")
-    qa_list: conlist(QAItem, min_length=1) = Field(
+    qa_pairs: conlist(QAItem, min_length=1) = Field(
         ...,
-        alias="qa_pairs",
         description="질문-답변 쌍의 리스트"
     )
 
