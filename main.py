@@ -18,7 +18,7 @@ def setup_logging() -> None:
 	로그는 파일(processing.log)과 콘솔 스트림으로 동시에 출력된다.
 	"""
 	log_format = '%(asctime)s - %(levelname)s - [%(funcName)s:%(lineno)d] - %(message)s'
-	# 루트 로거의 기존 핸들러를 모두 제거하여 중복 출력을 방지한다.
+	# root logger의 기존 핸들러를 모두 제거하여 중복 출력을 방지한다.
 	for handler in logging.root.handlers[:]:
 		logging.root.removeHandler(handler)
 
@@ -90,6 +90,11 @@ def setup_arg_parser(choices: list) -> argparse.ArgumentParser:
 		default=None,
 		help="Maximum number of files to process. If not specified, all found files will be processed."
 	)
+	parser.add_argument(
+		"--self-correction",
+		action='store_true',
+		help="Enable self-correction mode. The LLM will attempt to fix its own JSON errors."
+	)
 	return parser
 
 
@@ -105,7 +110,11 @@ async def main() -> None:
 		parser = setup_arg_parser(list(generator_map.keys()))
 		args = parser.parse_args()
 
+		if args.self_correction:
+			settings.ENABLE_SELF_CORRECTION = True
+
 		logging.info(f"Script execution started. Generation type: '{args.type}'")
+		logging.info(f"Self-Correction Mode: {'ENABLED' if settings.ENABLE_SELF_CORRECTION else 'DISABLED'}")
 
 		generator_class = generator_map[args.type]
 		generator = generator_class(settings)

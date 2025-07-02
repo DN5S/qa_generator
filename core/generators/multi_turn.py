@@ -13,7 +13,7 @@ class MultiTurnGenerator(DatasetGenerator):
 
     @property
     def _get_prompt_path(self) -> Path:
-        return self.settings.TEMPLATE_DIRECTORY / "multi_turn" / "prompt.md"
+        return self.settings.PROMPTS_DIRECTORY / "multi_turn" / "prompt.md"
 
     @property
     def _get_schema_template_name(self) -> str:
