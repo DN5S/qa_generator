@@ -29,7 +29,7 @@ class DatasetGenerator(ABC):
 		self.client: genai.client.Client = get_gemini_client()
 		self._get_output_directory.mkdir(parents=True, exist_ok=True)
 		self.semaphore = asyncio.Semaphore(self.settings.MAX_CONCURRENT_REQUESTS)
-		self.template_manager = PromptTemplateManager(self.settings.TEMPLATE_DIRECTORY)
+		self.template_manager = PromptTemplateManager(self.settings.PROMPTS_DIRECTORY)
 
 	def _assemble_prompt(self, **kwargs) -> str:
 		"""
@@ -46,7 +46,7 @@ class DatasetGenerator(ABC):
 					f"Partial '{partial_name}' required by {self.__class__.__name__} not found. Using empty string.")
 				format_args[partial_name] = ""
 
-		main_template_key = self._get_prompt_path.relative_to(self.settings.TEMPLATE_DIRECTORY).as_posix()
+		main_template_key = self._get_prompt_path.relative_to(self.settings.PROMPTS_DIRECTORY).as_posix()
 		main_template = self.template_manager.get_template(main_template_key)
 		return main_template.format(**format_args)
 
@@ -94,7 +94,7 @@ class DatasetGenerator(ABC):
 		문서와 각 생성기 타입에 필요한 추가 데이터를 사용하여 최종 프롬프트를 조립한다.
 		"""
 		schema_template_key = (self._get_prompt_path.parent.relative_to(
-			self.settings.TEMPLATE_DIRECTORY) / self._get_schema_template_name).as_posix()
+			self.settings.PROMPTS_DIRECTORY) / self._get_schema_template_name).as_posix()
 		schema_template = self.template_manager.get_template(schema_template_key)
 
 		format_args = {"document": document, "output_schema_template": schema_template}
@@ -119,22 +119,52 @@ class DatasetGenerator(ABC):
 				)
 				response_text = response.text
 				validated_data = validation_schema.model_validate_json(response_text)
+
 				logging.info(f"Success on first try for {filename}.")
 				return validated_data
+
 			except (json.JSONDecodeError, ValidationError) as e:
 				last_error = e
 				logging.warning(f"Initial validation failed for {filename}. Attempting repair. Error: {e}")
-				if response_text is None:
-					continue
+
+				if response_text is None: continue
+
+				# '자가 수정' 모드 활성화 시, LLM에게 수정 요청
+				if self.settings.ENABLE_SELF_CORRECTION:
+					logging.info(f"Attempting self-correction for {filename}...")
+					correction_prompt = (
+						f"The JSON you previously generated is invalid. Please fix it.\n"
+						f"Original Prompt (for context):\n---\n{prompt[:1000]}...\n---\n"
+						f"Invalid JSON Output:\n---\n{response_text}\n---\n"
+						f"Validation Error:\n---\n{e}\n---\n"
+						f"Please provide only the corrected, valid JSON object that adheres strictly to the schema."
+					)
+
+					try:
+						correction_response = await self.client.aio.models.generate_content(
+							model=self.settings.MODEL_NAME, contents=correction_prompt, config=generation_config
+						)
+						corrected_text = correction_response.text
+						validated_data = validation_schema.model_validate_json(corrected_text)
+						logging.info(f"Successfully self-corrected and validated JSON for {filename}.")
+						return validated_data
+
+					except Exception as self_correction_error:
+						logging.warning(
+							f"Self-correction failed for {filename}. Falling back to json_repair. Error: {self_correction_error}")
+
+				# 자가 수정 실패 시 json_repair로 넘어간다.
 				try:
 					repaired_json_str = repair_json(response_text)
 					validated_data = validation_schema.model_validate_json(repaired_json_str)
 					logging.info(f"Successfully repaired and validated JSON for {filename}.")
 					return validated_data
+
 				except (json.JSONDecodeError, ValidationError) as repair_error:
 					logging.error(
 						f"JSON repair failed for {filename}. Saving original text. Repair Error: {repair_error}")
 					return response_text
+
 			except Exception as e:
 				last_error = e
 				logging.warning(
