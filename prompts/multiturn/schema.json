@@ -1,27 +1,14 @@
 {
-  "conversations": [
+  "turns": [
     {
-      "info": {
-        "case_name": "string or null",
-        "case_no": "string or null",
-        "resolution_no": "string or null",
-        "accused": "string or null",
-        "resolution_date": "YYYY-MM-DD or null"
-      },
-      "conversation_id": "string",
-      "topic": "string",
-      "turns": [
-        {
-          "turn": 1,
-          "question": "string",
-          "answer": "string (결론 + 상세설명 + 근거 인용 구조)"
-        },
-        {
-          "turn": 2,
-          "question": "string",
-          "answer": "string (결론 + 상세설명 + 근거 인용 구조)"
-        }
-      ]
+      "turn": 1,
+      "question": "string",
+      "answer": "string (결론 + 상세설명 + 근거 인용 구조)"
+    },
+    {
+      "turn": 2,
+      "question": "string",
+      "answer": "string (결론 + 상세설명 + 근거 인용 구조)"
     }
   ]
 }

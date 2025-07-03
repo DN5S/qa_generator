@@ -17,6 +17,17 @@ class Info(BaseModel):
     accused: Optional[str] = Field(None, description="피심인")
     resolution_date: Optional[date] = Field(None, description="의결일자 (YYYY-MM-DD)")
 
+class Metadata(BaseModel):
+    """
+    데이터 인스턴스의 출처, 버전, 생성 정보를 담는 새로운 표준 메타데이터.
+    """
+    identifier: str = Field(..., description="데이터 개체의 고유 식별자. 예: 'prec_01_23843_cot_00001'")
+    dataset_version: str = Field(..., description="데이터셋의 버전. 예: '1.0'")
+    creator: str = Field(..., description="데이터 생성 기관. 예: '㈜OO회사'")
+    created_date: date = Field(..., description="데이터 생성 날짜 (YYYY-MM-DD)")
+    source_document_id: str = Field(..., description="원본 문서 파일명. 예: 'prec_01_23843.md'")
+    subject: List[str] = Field(..., description="데이터의 주제 키워드. 예: ['판례', 'cot']")
+
 # ============================================
 # --- 공통 QA 구조체 (Common QA Structures) ---
 # ============================================
@@ -29,9 +40,8 @@ class BaseQASet(ValidationSchema, Generic[QAItem]):
     모든 QA 세트의 공통 구조를 정의하는 제네릭 베이스 모델.
     info, topic, conversation_id 등 공통 필드를 포함한다.
     """
-    conversation_id: UUID = Field(default_factory=uuid4, description="QA 세트를 식별하기 위한 고유 UUID")
-    topic: str = Field(..., description="QA 세트의 전체 주제.")
-    info: Info = Field(..., description="문서의 메타데이터 정보")
+    metadata: Metadata = Field(..., description="데이터셋의 표준 메타데이터")
+    source_document_content: List[str] = Field(..., description="QA 생성의 기반이 된 원본 문서의 내용.")
     qa_pairs: conlist(QAItem, min_length=1) = Field(
         ...,
         description="질문-답변 쌍의 리스트"
@@ -51,6 +61,9 @@ class SingleTurnQA(BaseQASet[SingleTurnQAItem]):
     """Single-Turn QA 데이터셋의 전체 구조."""
     pass
 
+class SingleTurnLLMOutput(ValidationSchema):
+    qa_pairs: conlist(SingleTurnQAItem, min_length=1)
+
 # ========================
 # --- Chain-of-Thought ---
 # ========================
@@ -65,6 +78,9 @@ class CotQA(BaseQASet[CotQAItem]):
     """CoT QA 데이터셋의 전체 구조."""
     pass
 
+class CotLLMOutput(ValidationSchema):
+    qa_pairs: conlist(CotQAItem, min_length=1)
+
 # ==================
 # --- Multi-Turn ---
 # ==================
@@ -77,9 +93,8 @@ class ConversationTurn(BaseModel):
 
 class MultiTurnConversation(BaseModel):
     """하나의 완전한 Multi-turn 대화 세션의 데이터 구조."""
-    info: Info = Field(..., description="대화의 기반이 된 문서의 메타데이터 정보.")
-    conversation_id: UUID = Field(default_factory=uuid4, description="대화 세션을 식별하기 위한 고유 UUID.")
-    topic: str = Field(..., description="대화의 전체 주제.")
+    metadata: Metadata = Field(..., description="대화의 기반이 된 문서의 표준 메타데이터.")
+    source_document_content: List[str] = Field(..., description="QA 생성의 기반이 된 원본 문서의 내용.")
     turns: conlist(ConversationTurn, min_length=1) = Field(..., description="대화 턴의 리스트.")
 
 class MultiTurnQA(ValidationSchema):
@@ -91,3 +106,8 @@ class MultiTurnQA(ValidationSchema):
         ...,
         description="여러 대화 세션의 리스트."
     )
+
+class MultiTurnLLMOutput(ValidationSchema):
+    # Multi-turn의 경우, LLM은 'turns' 배열만 생성한다.
+    # 최종 MultiTurnQA 객체는 시스템이 조립한다.
+    turns: conlist(ConversationTurn, min_length=1)

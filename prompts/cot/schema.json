@@ -1,12 +1,4 @@
 {
-  "info": {
-    "case_name": "string or null",
-    "case_no": "string or null",
-    "resolution_no": "string or null",
-    "accused": "string or null",
-    "resolution_date": "YYYY-MM-DD or null"
-  },
-  "topic": "string",
   "qa_pairs": [
     {
       "question": "string",

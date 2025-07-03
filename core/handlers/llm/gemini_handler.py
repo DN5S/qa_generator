@@ -16,10 +16,10 @@ class GeminiHandler(BaseLLMHandler):
 	def __init__(self, settings: Settings):
 		self.settings = settings
 		logging.info("Initializing Gemini client with API key...")
-		self.client = genai.Client(api_key=self.settings.GEMINI_API_KEY)
+		self.client = genai.Client(api_key=self.settings.llm.GEMINI_API_KEY)
 		logging.info("Gemini client initialized successfully.")
 
-		self.semaphore = asyncio.Semaphore(settings.MAX_CONCURRENT_REQUESTS)
+		self.semaphore = asyncio.Semaphore(settings.llm.MAX_CONCURRENT_REQUESTS)
 		self.generation_config = GenerateContentConfig(response_mime_type="application/json")
 
 	async def generate_async(self, prompt: str, filename: str) -> Optional[str]:
@@ -36,13 +36,13 @@ class GeminiHandler(BaseLLMHandler):
 			"""
 			async with self.semaphore:
 				last_error: Optional[Exception] = None
-				for attempt in range(self.settings.API_RETRY_COUNT):
+				for attempt in range(self.settings.llm.API_RETRY_COUNT):
 					try:
 						logging.info(
-							f"[{filename}] Requesting Gemini API... (Attempt {attempt + 1}/{self.settings.API_RETRY_COUNT})")
+							f"[{filename}] Requesting Gemini API... (Attempt {attempt + 1}/{self.settings.llm.API_RETRY_COUNT})")
 
 						response: GenerateContentResponse = await self.client.aio.models.generate_content(
-							model=self.settings.MODEL_NAME.value,
+							model=self.settings.llm.MODEL_NAME.value,
 							contents=prompt,
 							config=self.generation_config
 						)
@@ -56,12 +56,12 @@ class GeminiHandler(BaseLLMHandler):
 					except Exception as e:
 						last_error = e
 						logging.warning(
-							f"[{filename}] API call failed (Attempt {attempt + 1}/{self.settings.API_RETRY_COUNT}). Retrying in {self.settings.API_RETRY_DELAY}s... Error: {e}"
+							f"[{filename}] API call failed (Attempt {attempt + 1}/{self.settings.llm.API_RETRY_COUNT}). Retrying in {self.settings.llm.API_RETRY_DELAY}s... Error: {e}"
 						)
-						if attempt < self.settings.API_RETRY_COUNT - 1:
-							await asyncio.sleep(self.settings.API_RETRY_DELAY)
+						if attempt < self.settings.llm.API_RETRY_COUNT - 1:
+							await asyncio.sleep(self.settings.llm.API_RETRY_DELAY)
 
 				logging.error(
-					f"[{filename}] API call failed after {self.settings.API_RETRY_COUNT} attempts. Last error: {last_error}"
+					f"[{filename}] API call failed after {self.settings.llm.API_RETRY_COUNT} attempts. Last error: {last_error}"
 				)
 				return None

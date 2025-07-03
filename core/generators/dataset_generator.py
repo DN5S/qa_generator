@@ -4,6 +4,7 @@ import asyncio
 import inspect
 import logging
 from abc import ABC, abstractmethod
+from datetime import date
 from pathlib import Path
 from typing import Dict, Type, Optional, List
 
@@ -13,7 +14,7 @@ from core.handlers.llm.base_handler import BaseLLMHandler
 from core.processors.response_processor import ResponseProcessor
 from core.prompt_manager import PromptTemplateManager
 import schemas.datasets as dataset_schemas
-from schemas.datasets import ValidationSchema
+from schemas.datasets import ValidationSchema, Metadata, SingleTurnQA, CotQA, MultiTurnQA, MultiTurnConversation
 
 class DatasetGenerator(ABC):
 	"""
@@ -64,7 +65,7 @@ class DatasetGenerator(ABC):
 	@property
 	def _get_required_partials(self) -> List[str]:
 		"""모든 제너레이터가 공통으로 사용하는 partial 템플릿 목록."""
-		return ['system_prompt', 'metadata_rules', 'qa_answer_rules']
+		return ['system_prompt', 'qa_answer_rules']
 
 	def _get_extra_template_args(self) -> dict:
 		"""
@@ -111,13 +112,15 @@ class DatasetGenerator(ABC):
 	@classmethod
 	def _build_validation_schema_map(cls) -> None:
 		""" schemas.datasets 모듈을 탐색하여 제너레이터 타입과 검증 스키마를 동적으로 매핑한다. """
-		logging.info("Building validation schema map dynamically...")
-		for name, schema_class in inspect.getmembers(dataset_schemas, inspect.isclass):
-			if issubclass(schema_class, ValidationSchema) and name != 'ValidationSchema':
-				base_name = name.removesuffix("QA").removesuffix("_qa")
-				generator_type_key = base_name.lower()
-				cls._validation_schema_map[generator_type_key] = schema_class
-				logging.info(f"  Discovered and mapped schema: '{generator_type_key}' -> {name}")
+		logging.info("Building LLM output validation schema map...")
+		schema_map = {
+			"singleturn": dataset_schemas.SingleTurnLLMOutput,
+			"cot": dataset_schemas.CotLLMOutput,
+			"multiturn": dataset_schemas.MultiTurnLLMOutput,
+		}
+		for gen_type, schema_class in schema_map.items():
+			cls._validation_schema_map[gen_type] = schema_class
+			logging.info(f"  Mapped LLM output schema: '{gen_type}' -> {schema_class.__name__}")
 
 	def _get_validation_schema(self) -> Type[ValidationSchema]:
 		""" 동적으로 빌드된 맵에서 현재 제너레이터에 맞는 검증 스키마를 반환한다. """
@@ -156,7 +159,18 @@ class DatasetGenerator(ABC):
 				f"Please provide ONLY the corrected, valid JSON object."
 			)
 
-	async def execute_pipeline_for_file(self, filepath: Path) -> None:
+	def _create_metadata(self, filepath: Path, file_index: int) -> Metadata:
+		""" 프로그래밍 방식으로 메타데이터 객체를 생성한다. """
+		return Metadata(
+			identifier=f"{filepath.stem}_{self.GENERATOR_TYPE}_{file_index:05d}",
+			dataset_version=self.settings.metadata.DATASET_VERSION,
+			creator=self.settings.metadata.CREATOR,
+			created_date=date.today(),
+			source_document_id=filepath.name,
+			subject=[self.GENERATOR_TYPE]  # 추후 확장 가능
+		)
+
+	async def execute_pipeline_for_file(self, filepath: Path, file_index: int) -> None:
 		"""
 		단일 파일에 대한 전체 데이터 생성 파이프라인을 지휘한다.
 
@@ -165,6 +179,7 @@ class DatasetGenerator(ABC):
 
 		Args:
 		    filepath: 처리할 대상 파일의 Path 객체.
+		    file_index: 처리할 대상 파일의 index.
 		"""
 		filename = filepath.name
 		logging.info(f"Executing pipeline for {filename}")
@@ -182,17 +197,40 @@ class DatasetGenerator(ABC):
 				return
 
 			# 4. 1차 응답 처리 (ResponseProcessor 위임)
-			result = await self.response_processor.process_async(response_text, self._get_validation_schema(), filename)
+			validation_schema = self._get_validation_schema()
+			result = await self.response_processor.process_async(response_text, validation_schema, filename)
 
 			# 5. 결과에 따른 분기 처리
 			if result.is_successful:
 				# 성공: 결과 저장
+				metadata = self._create_metadata(filepath, file_index)
+				document_lines = document_content.splitlines()
+
+				# 제너레이터 타입에 따라 최종 객체 조립
+				final_data: ValidationSchema
+				if self.GENERATOR_TYPE == 'multiturn':
+					# multiturn은 구조가 다르므로 별도 처리
+					conversation = MultiTurnConversation(
+						metadata=metadata,
+						source_document_content=document_lines,
+						turns=result.validated_data.turns
+					)
+					final_data = MultiTurnQA(conversations=[conversation])
+				else:
+					# singleturn, cot 등 BaseQASet을 따르는 경우
+					full_schema = {"singleturn": SingleTurnQA, "cot": CotQA}[self.GENERATOR_TYPE]
+					final_data = full_schema(
+						metadata=metadata,
+						source_document_content=document_lines,
+						qa_pairs=result.validated_data.qa_pairs
+					)
+
 				output_path = self.file_handler.get_output_path(self.GENERATOR_TYPE, filename)
-				await self.file_handler.write_file_async(output_path, result.validated_data)
+				await self.file_handler.write_file_async(output_path, final_data)
 				return
 
 			# 자가 수정 필요 & 옵션 활성화 시
-			if result.needs_self_correction and self.settings.ENABLE_SELF_CORRECTION:
+			if result.needs_self_correction and self.settings.llm.ENABLE_SELF_CORRECTION:
 				logging.info(f"[{filename}] Attempting self-correction...")
 				correction_prompt = self._create_self_correction_prompt(prompt, result.broken_text)
 
@@ -206,9 +244,27 @@ class DatasetGenerator(ABC):
 					                                                               filename)
 					if corrected_result.is_successful:
 						# 자가 수정 성공: 결과 저장
+						metadata = self._create_metadata(filepath, file_index)
+						document_lines = document_content.splitlines()
+
+						final_data: ValidationSchema
+						if self.GENERATOR_TYPE == 'multiturn':
+							conversation = MultiTurnConversation(
+								metadata=metadata,
+								source_document_content=document_lines,
+								turns=corrected_result.validated_data.turns
+							)
+							final_data = MultiTurnQA(conversations=[conversation])
+						else:
+							full_schema = {"singleturn": SingleTurnQA, "cot": CotQA}[self.GENERATOR_TYPE]
+							final_data = full_schema(
+								metadata=metadata,
+								source_document_content=document_lines,
+								qa_pairs=corrected_result.validated_data.qa_pairs
+							)
 						logging.info(f"[{filename}] Self-correction successful.")
 						output_path = self.file_handler.get_output_path(self.GENERATOR_TYPE, filename)
-						await self.file_handler.write_file_async(output_path, corrected_result.validated_data)
+						await self.file_handler.write_file_async(output_path, final_data)
 						return
 
 			# 최종 실패: 깨진 텍스트 저장
@@ -236,6 +292,9 @@ class DatasetGenerator(ABC):
 		if not files_to_process:
 			return
 
-		tasks = [self.execute_pipeline_for_file(filepath) for filepath in files_to_process]
+		tasks = []
+		for i, filepath in enumerate(files_to_process):
+			tasks.append(self.execute_pipeline_for_file(filepath, file_index=i + 1))
+
 		await asyncio.gather(*tasks)
 		logging.info("All file processing pipelines have been completed.")
