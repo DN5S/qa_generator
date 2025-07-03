@@ -6,13 +6,10 @@
 
 ### **Chain_of_Thought**
 1.  **문서 전체 정독**: `<Document_Text>`를 읽고 구조를 파악합니다.
-2.  **메타데이터 추출**: `<Metadata_Extraction_Rules>`에 따라 `info` 객체를 구성합니다.
-3.  **질문-사고-답변(QTA) 생성**: `<QTA_Generation_Rules>`에 따라 10개의 QTA 쌍을 생성합니다. 
-4.  **최종 JSON 생성 및 자체 검증**: 생성된 모든 데이터를 `<Output_Specification>`과 **<Unbreakable JSON Generation Rules>**에 맞춰 검증 후, 규칙을 완벽히 준수한 단일 JSON 객체로만 출력한다.
+2.  **질문-사고-답변(QTA) 생성**: `<QTA_Generation_Rules>`에 따라 10개의 QTA 쌍을 생성합니다.
+3.  **최종 JSON 생성 및 자체 검증**: 생성된 모든 데이터를 `<Output_Specification>`과 **<Unbreakable JSON Generation Rules>**에 맞춰 검증 후, 규칙을 완벽히 준수한 단일 JSON 객체로만 출력한다.
 
 ### **Generation Rules**
-{metadata_rules}
-
 #### 2. QTA_Generation_Rules
 아래 규칙에 따라 10개의 QTA 객체를 `qa_pairs` 배열에 생성합니다.
 1.  **질문(`question`) 생성**: 사실 확인형과 분석/추론형 질문을 균형 있게 생성합니다. 질문은 문서의 핵심 내용을 파고들어야 한다.
@@ -38,9 +35,8 @@
 
 ### **Output Specification**
 - 최종 결과는 다른 어떤 설명도 없이, 아래 구조를 가진 단일 JSON 객체로만 출력해야 합니다.
-- **`CotQA` 스키마를 반드시 준수해야 한다.** 
-- **`thought` 필드는 반드시 문자열의 JSON 배열(an array of strings) 형식이어야 한다.** 각 문자열은 사고 과정의 한 단계를 의미한다.
-- **주의: `conversation_id` 필드는 절대 직접 생성하지 마라. 키 자체를 JSON 출력에서 생략해야 한다. 시스템이 자동으로 고유 ID를 부여할 것이다.**
+- **이제부터 당신의 유일한 임무는 `qa_pairs` 배열을 생성하는 것입니다.**
+- 다른 모든 메타데이터는 시스템이 자동으로 처리할 것입니다.
 
 ```
 {output_schema_template}
