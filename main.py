@@ -122,7 +122,7 @@ async def main() -> None:
 		args = parser.parse_args()
 
 		if args.self_correction:
-			settings.ENABLE_SELF_CORRECTION = True
+			settings.llm.ENABLE_SELF_CORRECTION = True
 			logging.info("Self-correction mode ENABLED by command-line argument.")
 
 		logging.info(f"Script execution started. Generation type: '{args.type}', LLM Handler: '{args.llm}'")
