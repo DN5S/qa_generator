@@ -71,6 +71,7 @@ class SingleTurnLLMOutput(ValidationSchema):
 class CotQAItem(BaseModel):
     """Chain-of-Thought(CoT)의 단일 아이템 구조."""
     question: str = Field(..., description="생성된 질문")
+    instruction: str = Field(... , description="답변 생성을 위한 별도 Instructions.")
     thought: List[str] = Field(..., description="단계별 사고 과정(The chain of thought)의 리스트")
     answer: str = Field(..., description="사고 과정에 기반한 최종 답변")
 
