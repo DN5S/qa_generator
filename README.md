@@ -166,7 +166,7 @@ class SummaryQA(BaseQASet[SummaryItem]): # SummaryItem은 정의 필요
 
 ## Project Structure
 ```
-QA-Generator/
+qa_generator/
 ├── config/
 │   ├── __init__.py
 │   └── settings.py
@@ -197,7 +197,6 @@ QA-Generator/
 │   │   ├── prompt.md
 │   │   └── schema.json
 │   ├── partials/
-│   │   ├── _metadata_rules.md
 │   │   ├── _qa_answer_rules.md
 │   │   ├── _self_correction_prompt.md
 │   │   └── _system_prompt.md
@@ -211,7 +210,6 @@ QA-Generator/
 ├── README.md
 ├── main.py
 ├── pyproject.toml
-├── requirements.txt
 └── uv.lock
 
 ```

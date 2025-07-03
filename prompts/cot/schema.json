@@ -2,6 +2,7 @@
   "qa_pairs": [
     {
       "question": "string",
+      "instruction": "string",
       "thought": [
         "1단계: 질문 분해...",
         "2단계: 탐색 계획 및 실행...",
