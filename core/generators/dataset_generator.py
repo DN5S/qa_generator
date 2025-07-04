@@ -1,7 +1,6 @@
 # core/generators/dataset_generator.py
 
 import asyncio
-import inspect
 import logging
 from abc import ABC, abstractmethod
 from datetime import date
@@ -14,7 +13,7 @@ from core.handlers.llm.base_handler import BaseLLMHandler
 from core.processors.response_processor import ResponseProcessor
 from core.prompt_manager import PromptTemplateManager
 import schemas.datasets as dataset_schemas
-from schemas.datasets import ValidationSchema, Metadata, SingleTurnQA, CotQA, MultiTurnQA, MultiTurnConversation, BaseQASet
+from schemas.datasets import ValidationSchema, Metadata
 
 class DatasetGenerator(ABC):
 	"""
@@ -75,6 +74,14 @@ class DatasetGenerator(ABC):
 		return {}
 
 	# --- Prompt Assembly Methods ---
+
+	@abstractmethod
+	def _get_validation_schema(self) -> Type[ValidationSchema]:
+		"""
+		LLM의 출력을 검증할 Pydantic 스키마 타입을 반환한다.
+		이 책임은 각 하위 제너레이터에 위임된다.
+		"""
+		pass
 
 	@abstractmethod
 	def _assemble_final_data(self, llm_output: ValidationSchema, metadata: Metadata,
@@ -138,13 +145,6 @@ class DatasetGenerator(ABC):
 		for gen_type, schema_class in schema_map.items():
 			cls._validation_schema_map[gen_type] = schema_class
 			logging.info(f"  Mapped LLM output schema: '{gen_type}' -> {schema_class.__name__}")
-
-	def _get_validation_schema(self) -> Type[ValidationSchema]:
-		""" 동적으로 빌드된 맵에서 현재 제너레이터에 맞는 검증 스키마를 반환한다. """
-		schema = self._validation_schema_map.get(self.GENERATOR_TYPE)
-		if not schema:
-			raise ValueError(f"No validation schema found for GENERATOR_TYPE '{self.GENERATOR_TYPE}'.")
-		return schema
 
 	def _create_self_correction_prompt(self, original_prompt: str, broken_text: str) -> str:
 		"""

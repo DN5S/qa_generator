@@ -1,6 +1,6 @@
 # core/generators/cot_generator.py
 
-from typing import List
+from typing import List, Type
 from core.generators.dataset_generator import DatasetGenerator
 from schemas.datasets import ValidationSchema, Metadata, CotQA, CotLLMOutput
 
@@ -9,6 +9,9 @@ class CoTGenerator(DatasetGenerator):
     CoT(Chain of thought) QA 데이터셋을 생성하는 구체적인 구현체.
     """
     GENERATOR_TYPE = "cot"
+
+    def _get_validation_schema(self) -> Type[ValidationSchema]:
+        return CotLLMOutput
 
     def _assemble_final_data(self, llm_output: CotLLMOutput, metadata: Metadata,
                              document_content: List[str]) -> ValidationSchema:

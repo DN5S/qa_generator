@@ -1,6 +1,6 @@
 # core/generators/singleturn.py
 
-from typing import List
+from typing import List, Type
 from core.generators.dataset_generator import DatasetGenerator
 from schemas.datasets import ValidationSchema, Metadata, SingleTurnQA, SingleTurnLLMOutput
 
@@ -29,6 +29,9 @@ class SingleTurnGenerator(DatasetGenerator):
 			}
 		except KeyError:
 			raise
+
+	def _get_validation_schema(self) -> Type[ValidationSchema]:
+		return SingleTurnLLMOutput
 
 	def _assemble_final_data(self, llm_output: SingleTurnLLMOutput, metadata: Metadata,
 	                         document_content: List[str]) -> ValidationSchema:
