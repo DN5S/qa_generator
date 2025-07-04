@@ -14,7 +14,7 @@ from core.handlers.llm.base_handler import BaseLLMHandler
 from core.processors.response_processor import ResponseProcessor
 from core.prompt_manager import PromptTemplateManager
 import schemas.datasets as dataset_schemas
-from schemas.datasets import ValidationSchema, Metadata, SingleTurnQA, CotQA, MultiTurnQA, MultiTurnConversation
+from schemas.datasets import ValidationSchema, Metadata, SingleTurnQA, CotQA, MultiTurnQA, MultiTurnConversation, BaseQASet
 
 class DatasetGenerator(ABC):
 	"""
@@ -31,7 +31,7 @@ class DatasetGenerator(ABC):
 			"""
 			DatasetGenerator를 초기화한다.
 
-			의존성 주입(Dependency Injection)을 통해 필요한 전문가 모듈들을 주입받는다.
+			의존성 주입(Dependency Injection)을 통해 필요한 모듈들을 주입받는다.
 
 			Args:
 				settings: 애플리케이션의 전역 설정 객체.
@@ -75,6 +75,23 @@ class DatasetGenerator(ABC):
 		return {}
 
 	# --- Prompt Assembly Methods ---
+
+	@abstractmethod
+	def _assemble_final_data(self, llm_output: ValidationSchema, metadata: Metadata,
+	                         document_content: List[str]) -> ValidationSchema:
+		"""
+		LLM의 출력을 최종 저장될 데이터 구조로 조립한다.
+		이 책임은 각 하위 제너레이터에 위임된다.
+
+		Args:
+			llm_output: LLM으로부터 받은, 검증된 Pydantic 모델.
+			metadata: 생성된 메타데이터 객체.
+			document_content: 원본 문서의 내용 (줄 단위 리스트).
+
+		Returns:
+			파일에 저장될 최종 Pydantic 모델 객체.
+		"""
+		pass
 
 	def _assemble_prompt(self, **kwargs) -> str:
 		"""
@@ -170,6 +187,18 @@ class DatasetGenerator(ABC):
 			subject=[self.GENERATOR_TYPE]  # 추후 확장 가능
 		)
 
+	async def _process_and_save(self, llm_output: ValidationSchema, filepath: Path, file_index: int,
+	                            document_content: str):
+		"""성공적인 LLM 출력을 최종 데이터로 조립하고 저장하는 로직을 캡슐화한다."""
+		metadata = self._create_metadata(filepath, file_index)
+		document_lines = document_content.splitlines()
+
+		# 각 제너레이터에게 최종 데이터 조립을 위임한다.
+		final_data = self._assemble_final_data(llm_output, metadata, document_lines)
+
+		output_path = self.file_handler.get_output_path(self.GENERATOR_TYPE, filepath.name)
+		await self.file_handler.write_file_async(output_path, final_data)
+
 	async def execute_pipeline_for_file(self, filepath: Path, file_index: int) -> None:
 		"""
 		단일 파일에 대한 전체 데이터 생성 파이프라인을 지휘한다.
@@ -202,72 +231,29 @@ class DatasetGenerator(ABC):
 
 			# 5. 결과에 따른 분기 처리
 			if result.is_successful:
-				# 성공: 결과 저장
-				metadata = self._create_metadata(filepath, file_index)
-				document_lines = document_content.splitlines()
-
-				# 제너레이터 타입에 따라 최종 객체 조립
-				final_data: ValidationSchema
-				if self.GENERATOR_TYPE == 'multiturn':
-					# multiturn은 구조가 다르므로 별도 처리
-					conversation = MultiTurnConversation(
-						metadata=metadata,
-						source_document_content=document_lines,
-						turns=result.validated_data.turns
-					)
-					final_data = MultiTurnQA(conversations=[conversation])
-				else:
-					# singleturn, cot 등 BaseQASet을 따르는 경우
-					full_schema = {"singleturn": SingleTurnQA, "cot": CotQA}[self.GENERATOR_TYPE]
-					final_data = full_schema(
-						metadata=metadata,
-						source_document_content=document_lines,
-						qa_pairs=result.validated_data.qa_pairs
-					)
-
-				output_path = self.file_handler.get_output_path(self.GENERATOR_TYPE, filename)
-				await self.file_handler.write_file_async(output_path, final_data)
+				await self._process_and_save(result.validated_data, filepath, file_index, document_content)
 				return
 
-			# 자가 수정 필요 & 옵션 활성화 시
+			# 6. 자가 수정 시도
 			if result.needs_self_correction and self.settings.llm.ENABLE_SELF_CORRECTION:
 				logging.info(f"[{filename}] Attempting self-correction...")
 				correction_prompt = self._create_self_correction_prompt(prompt, result.broken_text)
 
-				# 3-1. 자가 수정을 위한 2차 API 호출
 				corrected_response_text = await self.llm_handler.generate_async(correction_prompt,
 				                                                                f"{filename} (Correction)")
 				if corrected_response_text:
-					# 4-1. 2차 응답 처리
-					corrected_result = await self.response_processor.process_async(corrected_response_text,
-					                                                               self._get_validation_schema(),
-					                                                               filename)
+					corrected_result = await self.response_processor.process_async(
+						corrected_response_text,
+						self._get_validation_schema(),
+						filename
+					)
 					if corrected_result.is_successful:
-						# 자가 수정 성공: 결과 저장
-						metadata = self._create_metadata(filepath, file_index)
-						document_lines = document_content.splitlines()
-
-						final_data: ValidationSchema
-						if self.GENERATOR_TYPE == 'multiturn':
-							conversation = MultiTurnConversation(
-								metadata=metadata,
-								source_document_content=document_lines,
-								turns=corrected_result.validated_data.turns
-							)
-							final_data = MultiTurnQA(conversations=[conversation])
-						else:
-							full_schema = {"singleturn": SingleTurnQA, "cot": CotQA}[self.GENERATOR_TYPE]
-							final_data = full_schema(
-								metadata=metadata,
-								source_document_content=document_lines,
-								qa_pairs=corrected_result.validated_data.qa_pairs
-							)
 						logging.info(f"[{filename}] Self-correction successful.")
-						output_path = self.file_handler.get_output_path(self.GENERATOR_TYPE, filename)
-						await self.file_handler.write_file_async(output_path, final_data)
+						await self._process_and_save(corrected_result.validated_data, filepath, file_index,
+						                             document_content)
 						return
 
-			# 최종 실패: 깨진 텍스트 저장
+			# 7. 최종 실패 처리
 			logging.error(f"[{filename}] All processing attempts failed.")
 			output_path = self.file_handler.get_output_path(self.GENERATOR_TYPE, filename, is_broken=True)
 			await self.file_handler.write_file_async(output_path, result.broken_text or response_text)

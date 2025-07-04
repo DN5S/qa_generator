@@ -1,6 +1,8 @@
 # core/generators/singleturn.py
 
+from typing import List
 from core.generators.dataset_generator import DatasetGenerator
+from schemas.datasets import ValidationSchema, Metadata, SingleTurnQA, SingleTurnLLMOutput
 
 class SingleTurnGenerator(DatasetGenerator):
 	"""
@@ -27,3 +29,12 @@ class SingleTurnGenerator(DatasetGenerator):
 			}
 		except KeyError:
 			raise
+
+	def _assemble_final_data(self, llm_output: SingleTurnLLMOutput, metadata: Metadata,
+	                         document_content: List[str]) -> ValidationSchema:
+		"""Single-turn QA 데이터의 최종 형태를 조립한다."""
+		return SingleTurnQA(
+			metadata=metadata,
+			source_document_content=document_content,
+			qa_pairs=llm_output.qa_pairs
+		)
