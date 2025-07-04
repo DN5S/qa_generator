@@ -26,7 +26,7 @@ class DatasetGenerator(ABC):
 	GENERATOR_TYPE: str = ""
 	_validation_schema_map: Dict[str, Type[ValidationSchema]] = {}
 
-	def __init__(self, settings: Settings, file_handler: FileHandler, llm_handler: BaseLLMHandler):
+	def __init__(self, settings: Settings, file_handler: FileHandler, llm_handler: BaseLLMHandler, template_manager: PromptTemplateManager):
 			"""
 			DatasetGenerator를 초기화한다.
 
@@ -36,6 +36,7 @@ class DatasetGenerator(ABC):
 				settings: 애플리케이션의 전역 설정 객체.
 				file_handler: 파일 시스템 I/O를 담당하는 핸들러.
 				llm_handler: LLM API 통신을 담당하는 핸들러.
+				template_manager: 프롬프트 템플릿을 관리하는 매니저.
 			"""
 			if not self.GENERATOR_TYPE:
 				raise NotImplementedError(f"{self.__class__.__name__} must define a GENERATOR_TYPE.")
@@ -44,7 +45,7 @@ class DatasetGenerator(ABC):
 			self.file_handler = file_handler
 			self.llm_handler = llm_handler
 			self.response_processor = ResponseProcessor()
-			self.template_manager = PromptTemplateManager(self.settings.paths.PROMPTS_DIRECTORY)
+			self.template_manager = template_manager
 
 			if not self.__class__._validation_schema_map:
 				self.__class__._build_validation_schema_map()

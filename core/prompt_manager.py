@@ -2,21 +2,18 @@
 
 import logging
 from pathlib import Path
-from typing import Optional
 
 class PromptTemplateManager:
-    _instance: Optional['PromptTemplateManager'] = None
     _templates: dict[str, str] = {}
 
-    def __new__(cls, *args, **kwargs):
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
-        return cls._instance
-
     def __init__(self, template_directory: Path):
-        # 이미 초기화되었다면, 다시 로드하지 않는다.
+        """
+        PromptTemplateManager를 초기화하고 모든 템플릿을 로드한다.
+        인스턴스는 호출자에 의해 생성 및 관리된다.
+        """
         if not self._templates:
             logging.info(f"Initializing PromptTemplateManager. Loading templates from '{template_directory}'...")
+            self._templates = {}  # 인스턴스별 템플릿 딕셔너리 초기화
             self._load_all_templates(template_directory)
             logging.info(f"Loaded {len(self._templates)} templates into cache.")
 
@@ -24,7 +21,6 @@ class PromptTemplateManager:
         """지정된 디렉터리와 하위 디렉터리에서 모든 템플릿 파일을 로드한다."""
         template_files = [p for p in base_path.rglob('*') if p.is_file() and p.suffix in ['.md', '.txt', '.json']]
         for file_path in template_files:
-            # key를 'singleturn/prompt.md' 와 같은 상대 경로로 만든다.
             key = file_path.relative_to(base_path).as_posix()
             try:
                 self._templates[key] = file_path.read_text(encoding='utf-8')
