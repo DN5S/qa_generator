@@ -12,6 +12,7 @@ from config.settings import settings
 from core.generators.dataset_generator import DatasetGenerator
 from core.handlers.file_handler import FileHandler
 from core.handlers.llm.base_handler import BaseLLMHandler
+from core.prompt_manager import PromptTemplateManager
 
 GeneratorClass: TypeAlias = Type[DatasetGenerator]
 LLMHandlerClass: TypeAlias = Type[BaseLLMHandler]
@@ -135,13 +136,15 @@ async def main() -> None:
 
 		llm_handler_class = llm_handler_map[args.llm]
 		llm_handler: BaseLLMHandler = llm_handler_class(settings)
+		template_manager = PromptTemplateManager(settings.paths.PROMPTS_DIRECTORY)
 
 		# --- 4. 의존성 주입 (Dependency Injection) ---
 		generator_class = generator_map[args.type]
 		generator = generator_class(
 			settings=settings,
 			file_handler=file_handler,
-			llm_handler=llm_handler
+			llm_handler=llm_handler,
+			template_manager=template_manager
 		)
 
 		# --- 5. 파이프라인 실행 ---
