@@ -4,7 +4,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Final
 
-from pydantic import Field
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 GEMINI_FLASH_MODEL: Final[str] = "gemini-2.0-flash"
@@ -27,7 +27,7 @@ class LLMSettings(BaseSettings):
     """LLM API 관련 설정을 관리한다."""
     model_config = SettingsConfigDict(env_prefix='LLM_', env_file='.env', extra='ignore')
 
-    GEMINI_API_KEY: str = Field(..., description="Google Gemini API Key.")
+    GEMINI_API_KEY: SecretStr = Field(..., description="Google Gemini API Key.")
     API_RETRY_COUNT: int = Field(default=3, description="API 호출 실패 시 재시도 횟수.")
     API_RETRY_DELAY: int = Field(default=5, description="API 재시도 간의 대기 시간(초).")
     MODEL_NAME: GeminiModels = Field(default=GeminiModels.FLASH, description="사용할 Gemini 모델의 식별자.")

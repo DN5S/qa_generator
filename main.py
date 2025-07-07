@@ -190,6 +190,7 @@ async def main() -> None:
 			template_manager=template_manager
 		)
 
+		logger.info(settings)
 		# --- 5. 파이프라인 실행 ---
 		await generator.run(num_files=args.num_files)
 
