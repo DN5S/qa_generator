@@ -13,4 +13,7 @@ dependencies = [
     "pip-audit>=2.9.0",
     "pytest>=8.4.1",
     "pytest-asyncio>=1.0.0",
+    "typer>=0.16.0",
+    "rich>=14.0.0",
+    "questionary>=2.0.0",
 ]
