@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Dict, Type, Optional, List
 
 from config.settings import Settings
+from config.logging_config import context_filename
 from core.handlers.file_handler import FileHandler
 from core.handlers.llm.base_handler import BaseLLMHandler
 from core.processors.response_processor import ResponseProcessor
@@ -211,24 +212,25 @@ class DatasetGenerator(ABC):
 		    filepath: 처리할 대상 파일의 Path 객체.
 		    file_index: 처리할 대상 파일의 index.
 		"""
-		filename = filepath.name
-		logging.info(f"Executing pipeline for {filename}")
+		token = context_filename.set(filepath.name)
+		logging.info(f"Executing pipeline for file index {file_index}")
 		try:
 			# 1. 파일 읽기 (FileHandler 위임)
 			document_content = await self.file_handler.read_file_async(filepath)
 
 			# 2. 프롬프트 조립
+			document_content = await self.file_handler.read_file_async(filepath)
 			prompt = self._get_final_prompt(document_content)
 
 			# 3. API 호출 (LLMHandler 위임)
-			response_text = await self.llm_handler.generate_async(prompt, filename)
+			response_text = await self.llm_handler.generate_async(prompt)
 			if response_text is None:
-				logging.error(f"[{filename}] Pipeline stopped because LLM response was None.")
+				logging.error("Pipeline stopped: LLM response was None.")
 				return
 
 			# 4. 1차 응답 처리 (ResponseProcessor 위임)
 			validation_schema = self._get_validation_schema()
-			result = await self.response_processor.process_async(response_text, validation_schema, filename)
+			result = await self.response_processor.process_async(response_text, validation_schema)
 
 			# 5. 결과에 따른 분기 처리
 			if result.is_successful:
@@ -237,31 +239,31 @@ class DatasetGenerator(ABC):
 
 			# 6. 자가 수정 시도
 			if result.needs_self_correction and self.settings.llm.ENABLE_SELF_CORRECTION:
-				logging.info(f"[{filename}] Attempting self-correction...")
+				logging.info("Attempting self-correction...")
 				correction_prompt = self._create_self_correction_prompt(prompt, result.broken_text)
 
-				corrected_response_text = await self.llm_handler.generate_async(correction_prompt,
-				                                                                f"{filename} (Correction)")
+				corrected_response_text = await self.llm_handler.generate_async(correction_prompt)
 				if corrected_response_text:
 					corrected_result = await self.response_processor.process_async(
-						corrected_response_text,
-						self._get_validation_schema(),
-						filename
+						corrected_response_text, self._get_validation_schema()
 					)
 					if corrected_result.is_successful:
-						logging.info(f"[{filename}] Self-correction successful.")
-						await self._process_and_save(corrected_result.validated_data, filepath, file_index,
-						                             document_content)
+						logging.info("Self-correction successful.")
+						await self._process_and_save(
+							corrected_result.validated_data, filepath, file_index, document_content
+						)
 						return
 
 			# 7. 최종 실패 처리
-			logging.error(f"[{filename}] All processing attempts failed.")
-			output_path = self.file_handler.get_output_path(self.GENERATOR_TYPE, filename, is_broken=True)
+			logging.error("All processing attempts failed.")
+			output_path = self.file_handler.get_output_path(self.GENERATOR_TYPE, filepath.name, is_broken=True)
 			await self.file_handler.write_file_async(output_path, result.broken_text or response_text)
 
+
 		except Exception as e:
-			logging.critical(f"An unexpected critical error occurred during pipeline for {filename}: {e}",
-			                 exc_info=True)
+			logging.critical(f"An unexpected critical error occurred during pipeline: {e}", exc_info=True)
+		finally:
+			context_filename.reset(token)
 
 	async def run(self, num_files: Optional[int] = None) -> None:
 		"""
@@ -279,9 +281,6 @@ class DatasetGenerator(ABC):
 		if not files_to_process:
 			return
 
-		tasks = []
-		for i, filepath in enumerate(files_to_process):
-			tasks.append(self.execute_pipeline_for_file(filepath, file_index=i + 1))
-
+		tasks = [self.execute_pipeline_for_file(filepath, i + 1) for i, filepath in enumerate(files_to_process)]
 		await asyncio.gather(*tasks)
 		logging.info("All file processing pipelines have been completed.")

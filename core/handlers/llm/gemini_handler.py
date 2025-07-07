@@ -22,14 +22,13 @@ class GeminiHandler(BaseLLMHandler):
 		self.semaphore = asyncio.Semaphore(settings.llm.MAX_CONCURRENT_REQUESTS)
 		self.generation_config = GenerateContentConfig(response_mime_type="application/json")
 
-	async def generate_async(self, prompt: str, filename: str) -> Optional[str]:
+	async def generate_async(self, prompt: str) -> Optional[str]:
 			"""
 			Gemini API에 비동기적으로 요청을 보내고, 순수한 텍스트 응답을 반환한다.
 			API 호출 실패 시 설정된 횟수만큼 재시도한다.
 
 			Args:
 				prompt: Gemini API에 전달할 프롬프트.
-				filename: 로깅을 위한 원본 파일명.
 
 			Returns:
 				API 호출 성공 시 응답 텍스트(str), 최종 실패 시 None.
@@ -38,8 +37,7 @@ class GeminiHandler(BaseLLMHandler):
 				last_error: Optional[Exception] = None
 				for attempt in range(self.settings.llm.API_RETRY_COUNT):
 					try:
-						logging.info(
-							f"[{filename}] Requesting Gemini API... (Attempt {attempt + 1}/{self.settings.llm.API_RETRY_COUNT})")
+						logging.info(f"Requesting Gemini API... (Attempt {attempt + 1}/{self.settings.llm.API_RETRY_COUNT})")
 
 						response: GenerateContentResponse = await self.client.aio.models.generate_content(
 							model=self.settings.llm.MODEL_NAME.value,
@@ -50,18 +48,16 @@ class GeminiHandler(BaseLLMHandler):
 						if not response.text:
 							raise ValueError("API response is empty.")
 
-						logging.info(f"[{filename}] Received response from Gemini API.")
+						logging.info("Received response from Gemini API.")
 						return response.text
 
 					except Exception as e:
 						last_error = e
 						logging.warning(
-							f"[{filename}] API call failed (Attempt {attempt + 1}/{self.settings.llm.API_RETRY_COUNT}). Retrying in {self.settings.llm.API_RETRY_DELAY}s... Error: {e}"
+							f"API call failed (Attempt {attempt + 1}/{self.settings.llm.API_RETRY_COUNT}). Retrying in {self.settings.llm.API_RETRY_DELAY}s... Error: {e}"
 						)
 						if attempt < self.settings.llm.API_RETRY_COUNT - 1:
 							await asyncio.sleep(self.settings.llm.API_RETRY_DELAY)
 
-				logging.error(
-					f"[{filename}] API call failed after {self.settings.llm.API_RETRY_COUNT} attempts. Last error: {last_error}"
-				)
+				logging.error(f"API call failed after {self.settings.llm.API_RETRY_COUNT} attempts. Last error: {last_error}")
 				return None

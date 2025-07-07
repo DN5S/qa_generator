@@ -10,7 +10,7 @@ class BaseLLMHandler(ABC):
     """
 
     @abstractmethod
-    async def generate_async(self, prompt: str, filename: str) -> Optional[str]:
+    async def generate_async(self, prompt: str) -> Optional[str]:
         """
         주어진 프롬프트를 사용하여 LLM으로부터 콘텐츠 생성을 비동기적으로 요청한다.
 
@@ -19,7 +19,6 @@ class BaseLLMHandler(ABC):
 
         Args:
             prompt: LLM에 전달할 전체 프롬프트 문자열.
-            filename: 로깅 및 에러 추적을 위한 원본 파일의 이름.
 
         Returns:
             성공 시 LLM이 생성한 순수 텍스트(str) 응답, 실패 시 None.

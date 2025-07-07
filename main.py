@@ -9,6 +9,7 @@ import pkgutil
 from typing import Dict, Type, TypeAlias
 
 from config.settings import settings
+from config.logging_config import ContextFilter
 from core.generators.dataset_generator import DatasetGenerator
 from core.handlers.file_handler import FileHandler
 from core.handlers.llm.base_handler import BaseLLMHandler
@@ -22,7 +23,7 @@ def setup_logging() -> None:
 	애플리케이션의 로깅 시스템을 초기화한다.
 	로그는 파일(processing.log)과 콘솔 스트림으로 동시에 출력된다.
 	"""
-	log_format = '%(asctime)s - %(levelname)s - [%(name)s:%(lineno)d] - %(message)s'
+	log_format = '%(asctime)s - %(levelname)s - [%(filename_context)s] - [%(name)s:%(lineno)d] - %(message)s'
 	logging.basicConfig(
 		level=logging.INFO,
 		format=log_format,
@@ -30,8 +31,12 @@ def setup_logging() -> None:
 			logging.FileHandler("processing.log", mode='w', encoding='utf-8'),
 			logging.StreamHandler()
 		],
-		force=True  # 기존 핸들러를 강제로 대체하여 중복 로깅 방지
+		force=True
 	)
+
+	for handler in logging.getLogger().handlers:
+		handler.addFilter(ContextFilter())
+
 	logging.info("========================================")
 	logging.info("Logging system initialized.")
 	logging.info("========================================")
