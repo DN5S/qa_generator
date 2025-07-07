@@ -34,7 +34,7 @@ AI 기반 QA 데이터셋 생성 도구
 
 ### 1. 프로젝트 클론
 ```bash
-git clone <repository-url>
+git clone https://github.com/DN5S/qa_generator.git
 cd qa-generator
 ```
 
