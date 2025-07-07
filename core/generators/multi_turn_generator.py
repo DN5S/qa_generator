@@ -10,7 +10,6 @@ class MultiTurnGenerator(DatasetGenerator):
     """
     Multi-Turn QA 데이터셋을 생성하는 구체적인 구현체.
     """
-    # GENERATOR_TYPE = "multiturn"
 
     def _get_validation_schema(self) -> Type[ValidationSchema]:
         return MultiTurnLLMOutput
