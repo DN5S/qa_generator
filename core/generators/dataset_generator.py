@@ -8,12 +8,15 @@ from pathlib import Path
 from typing import Dict, Type, Optional, List
 
 from config.settings import Settings
+from config.logging_config import context_filename
 from core.handlers.file_handler import FileHandler
 from core.handlers.llm.base_handler import BaseLLMHandler
 from core.processors.response_processor import ResponseProcessor
 from core.prompt_manager import PromptTemplateManager
 import schemas.datasets as dataset_schemas
 from schemas.datasets import ValidationSchema, Metadata
+
+logger = logging.getLogger(__name__)
 
 class DatasetGenerator(ABC):
 	"""
@@ -26,7 +29,8 @@ class DatasetGenerator(ABC):
 	GENERATOR_TYPE: str = ""
 	_validation_schema_map: Dict[str, Type[ValidationSchema]] = {}
 
-	def __init__(self, settings: Settings, file_handler: FileHandler, llm_handler: BaseLLMHandler, template_manager: PromptTemplateManager):
+	def __init__(self, settings: Settings, file_handler: FileHandler, llm_handler: BaseLLMHandler,
+	             template_manager: PromptTemplateManager):
 			"""
 			DatasetGenerator를 초기화한다.
 
@@ -49,6 +53,7 @@ class DatasetGenerator(ABC):
 
 			if not self.__class__._validation_schema_map:
 				self.__class__._build_validation_schema_map()
+				logger.info("Validation schema map built.")
 
 	# --- Properties for Prompt Assembly ---
 
@@ -113,8 +118,7 @@ class DatasetGenerator(ABC):
 				format_args[partial_name] = self.template_manager.get_template(partial_key)
 			except KeyError:
 				# 경고가 아닌, 치명적 오류를 기록하고 시스템을 멈춘다.
-				logging.critical(
-					f"FATAL: Required partial template '{partial_key}' not found. The system cannot continue without its core components.")
+				logger.critical(f"FATAL: Required partial template '{partial_key}' not found.")
 				raise
 
 		main_template_key = self._get_prompt_path.relative_to(self.settings.paths.PROMPTS_DIRECTORY).as_posix()
@@ -132,12 +136,14 @@ class DatasetGenerator(ABC):
 		format_args = {"document": document, "output_schema_template": schema_template}
 		format_args.update(self._get_extra_template_args())
 
-		return self._assemble_prompt(**format_args)
+		final_prompt = self._assemble_prompt(**format_args)
+		logger.debug(f"Assembled final prompt:\n---PROMPT START---\n{final_prompt[:500]}...\n---PROMPT END---")
+		return final_prompt
 
 	@classmethod
 	def _build_validation_schema_map(cls) -> None:
 		""" schemas.datasets 모듈을 탐색하여 제너레이터 타입과 검증 스키마를 동적으로 매핑한다. """
-		logging.info("Building LLM output validation schema map...")
+		logger.info("Building LLM output validation schema map...")
 		schema_map = {
 			"singleturn": dataset_schemas.SingleTurnLLMOutput,
 			"cot": dataset_schemas.CotLLMOutput,
@@ -145,7 +151,7 @@ class DatasetGenerator(ABC):
 		}
 		for gen_type, schema_class in schema_map.items():
 			cls._validation_schema_map[gen_type] = schema_class
-			logging.info(f"  Mapped LLM output schema: '{gen_type}' -> {schema_class.__name__}")
+			logger.info(f"  Mapped LLM output schema: '{gen_type}' -> {schema_class.__name__}")
 
 	def _create_self_correction_prompt(self, original_prompt: str, broken_text: str) -> str:
 		"""
@@ -158,18 +164,19 @@ class DatasetGenerator(ABC):
 		Returns:
 		    자가 수정을 요청하는 새로운 프롬프트 문자열.
 		"""
-		logging.info("Creating self-correction prompt...")
+		logger.info("Creating self-correction prompt...")
+		logger.debug(f"Broken text for self-correction:\n---BROKEN TEXT START---\n{broken_text}\n---BROKEN TEXT END---")
 		try:
 			# 템플릿 관리자를 통해 자가 수정 프롬프트 템플릿을 가져온다.
 			correction_template = self.template_manager.get_template('partials/_self_correction_prompt.md')
 
 			# 템플릿에 실제 값을 채워 최종 프롬프트를 생성한다.
 			return correction_template.format(
-				original_prompt=original_prompt[:1500] + "...",  # 원본 프롬프트가 너무 길 경우를 대비
+				original_prompt=original_prompt[:3000] + "...",  # 원본 프롬프트가 너무 길 경우를 대비
 				broken_text=broken_text
 			)
 		except KeyError:
-			logging.error("FATAL: Self-correction prompt template not found. Falling back to hardcoded prompt.")
+			logger.error("FATAL: Self-correction prompt template not found. Falling back to hardcoded prompt.")
 			# 템플릿을 찾지 못할 경우를 대비한 fallback
 			return (
 				f"The JSON you previously generated is invalid. Please fix it.\n"
@@ -179,7 +186,7 @@ class DatasetGenerator(ABC):
 
 	def _create_metadata(self, filepath: Path, file_index: int) -> Metadata:
 		""" 프로그래밍 방식으로 메타데이터 객체를 생성한다. """
-		return Metadata(
+		metadata = Metadata(
 			identifier=f"{filepath.stem}_{self.GENERATOR_TYPE}_{file_index:05d}",
 			dataset_version=self.settings.metadata.DATASET_VERSION,
 			creator=self.settings.metadata.CREATOR,
@@ -187,6 +194,8 @@ class DatasetGenerator(ABC):
 			source_document_id=filepath.name,
 			subject=[self.GENERATOR_TYPE]  # 추후 확장 가능
 		)
+		logger.debug(f"Created metadata: {metadata.model_dump_json()}")
+		return metadata
 
 	async def _process_and_save(self, llm_output: ValidationSchema, filepath: Path, file_index: int,
 	                            document_content: str):
@@ -196,6 +205,7 @@ class DatasetGenerator(ABC):
 
 		# 각 제너레이터에게 최종 데이터 조립을 위임한다.
 		final_data = self._assemble_final_data(llm_output, metadata, document_lines)
+		logger.debug(f"Assembled final data for saving: {final_data.model_dump_json(indent=2)[:500]}...")
 
 		output_path = self.file_handler.get_output_path(self.GENERATOR_TYPE, filepath.name)
 		await self.file_handler.write_file_async(output_path, final_data)
@@ -211,8 +221,9 @@ class DatasetGenerator(ABC):
 		    filepath: 처리할 대상 파일의 Path 객체.
 		    file_index: 처리할 대상 파일의 index.
 		"""
-		filename = filepath.name
-		logging.info(f"Executing pipeline for {filename}")
+		token = context_filename.set(filepath.name)
+		logger.info(f"Executing pipeline for file index {file_index}")
+
 		try:
 			# 1. 파일 읽기 (FileHandler 위임)
 			document_content = await self.file_handler.read_file_async(filepath)
@@ -221,14 +232,14 @@ class DatasetGenerator(ABC):
 			prompt = self._get_final_prompt(document_content)
 
 			# 3. API 호출 (LLMHandler 위임)
-			response_text = await self.llm_handler.generate_async(prompt, filename)
+			response_text = await self.llm_handler.generate_async(prompt)
 			if response_text is None:
-				logging.error(f"[{filename}] Pipeline stopped because LLM response was None.")
+				logger.error("Pipeline stopped: LLM response was None.")
 				return
 
 			# 4. 1차 응답 처리 (ResponseProcessor 위임)
 			validation_schema = self._get_validation_schema()
-			result = await self.response_processor.process_async(response_text, validation_schema, filename)
+			result = await self.response_processor.process_async(response_text, validation_schema)
 
 			# 5. 결과에 따른 분기 처리
 			if result.is_successful:
@@ -237,31 +248,30 @@ class DatasetGenerator(ABC):
 
 			# 6. 자가 수정 시도
 			if result.needs_self_correction and self.settings.llm.ENABLE_SELF_CORRECTION:
-				logging.info(f"[{filename}] Attempting self-correction...")
+				logger.info("Attempting self-correction...")
 				correction_prompt = self._create_self_correction_prompt(prompt, result.broken_text)
 
-				corrected_response_text = await self.llm_handler.generate_async(correction_prompt,
-				                                                                f"{filename} (Correction)")
+				corrected_response_text = await self.llm_handler.generate_async(correction_prompt)
 				if corrected_response_text:
 					corrected_result = await self.response_processor.process_async(
-						corrected_response_text,
-						self._get_validation_schema(),
-						filename
+						corrected_response_text, self._get_validation_schema()
 					)
 					if corrected_result.is_successful:
-						logging.info(f"[{filename}] Self-correction successful.")
-						await self._process_and_save(corrected_result.validated_data, filepath, file_index,
-						                             document_content)
+						logger.info("Self-correction successful.")
+						await self._process_and_save(
+							corrected_result.validated_data, filepath, file_index, document_content
+						)
 						return
 
 			# 7. 최종 실패 처리
-			logging.error(f"[{filename}] All processing attempts failed.")
-			output_path = self.file_handler.get_output_path(self.GENERATOR_TYPE, filename, is_broken=True)
+			logger.error("All processing attempts failed.")
+			output_path = self.file_handler.get_output_path(self.GENERATOR_TYPE, filepath.name, is_broken=True)
 			await self.file_handler.write_file_async(output_path, result.broken_text or response_text)
 
 		except Exception as e:
-			logging.critical(f"An unexpected critical error occurred during pipeline for {filename}: {e}",
-			                 exc_info=True)
+			logger.critical(f"An unexpected critical error occurred during pipeline: {e}", exc_info=True)
+		finally:
+			context_filename.reset(token)
 
 	async def run(self, num_files: Optional[int] = None) -> None:
 		"""
@@ -279,9 +289,6 @@ class DatasetGenerator(ABC):
 		if not files_to_process:
 			return
 
-		tasks = []
-		for i, filepath in enumerate(files_to_process):
-			tasks.append(self.execute_pipeline_for_file(filepath, file_index=i + 1))
-
+		tasks = [self.execute_pipeline_for_file(filepath, i + 1) for i, filepath in enumerate(files_to_process)]
 		await asyncio.gather(*tasks)
-		logging.info("All file processing pipelines have been completed.")
+		logger.info("All file processing pipelines have been completed.")

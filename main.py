@@ -6,9 +6,11 @@ import importlib
 import inspect
 import logging
 import pkgutil
+from datetime import datetime
 from typing import Dict, Type, TypeAlias
 
 from config.settings import settings
+from config.logging_config import ContextFilter
 from core.generators.dataset_generator import DatasetGenerator
 from core.handlers.file_handler import FileHandler
 from core.handlers.llm.base_handler import BaseLLMHandler
@@ -17,24 +19,49 @@ from core.prompt_manager import PromptTemplateManager
 GeneratorClass: TypeAlias = Type[DatasetGenerator]
 LLMHandlerClass: TypeAlias = Type[BaseLLMHandler]
 
-def setup_logging() -> None:
+def setup_logging(level: str) -> None:
 	"""
 	애플리케이션의 로깅 시스템을 초기화한다.
 	로그는 파일(processing.log)과 콘솔 스트림으로 동시에 출력된다.
+	Args:
+		level: 로그 레벨
 	"""
-	log_format = '%(asctime)s - %(levelname)s - [%(name)s:%(lineno)d] - %(message)s'
+	# 1. 로그 레벨 설정
+	log_level = getattr(logging, level.upper(), logging.INFO)
+
+	# 2. 로그 디렉토리 생성
+	log_dir = settings.paths.LOGS_DIRECTORY
+	log_dir.mkdir(parents=True, exist_ok=True)
+
+	# 3. 타임스탬프 기반 로그 파일명 생성
+	timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+	log_filename = f"{timestamp}.log"
+	log_filepath = log_dir / log_filename
+
+	# 4. 로깅 기본 설정
+	log_format = '%(asctime)s - %(levelname)s - [%(filename_context)s] - [%(name)s:%(lineno)d] - %(message)s'
 	logging.basicConfig(
-		level=logging.INFO,
+		level=log_level,  # 동적으로 설정된 로그 레벨 사용
 		format=log_format,
 		handlers=[
-			logging.FileHandler("processing.log", mode='w', encoding='utf-8'),
+			logging.FileHandler(log_filepath, mode='w', encoding='utf-8'),  # 타임스탬프 파일에 저장
 			logging.StreamHandler()
 		],
-		force=True  # 기존 핸들러를 강제로 대체하여 중복 로깅 방지
+		force=True
 	)
-	logging.info("========================================")
-	logging.info("Logging system initialized.")
-	logging.info("========================================")
+
+	# 5. 모든 핸들러에 ContextFilter 적용
+	context_filter = ContextFilter()
+	for handler in logging.getLogger().handlers:
+		handler.addFilter(context_filter)
+
+	logging.getLogger("httpx").setLevel(logging.WARNING)
+	logging.getLogger("google_genai").setLevel(logging.WARNING)
+
+	initial_logger = logging.getLogger(__name__)
+	initial_logger.info("========================================")
+	initial_logger.info("Logging system initialized.")
+	initial_logger.info("========================================")
 
 
 def discover_modules(package_path, package_name, base_class, suffix) -> Dict[str, Type]:
@@ -51,19 +78,21 @@ def discover_modules(package_path, package_name, base_class, suffix) -> Dict[str
 		{키: 클래스} 형태의 딕셔너리.
 	"""
 	module_map: Dict[str, Type] = {}
+	logger = logging.getLogger(__name__)
 
 	for module_info in pkgutil.walk_packages(package_path, f"{package_name}."):
 		try:
 			module = importlib.import_module(module_info.name)
 			for name, obj in inspect.getmembers(module, inspect.isclass):
 				if issubclass(obj, base_class) and obj is not base_class:
-					key = name.replace(suffix, "").lower()
-					module_map[key] = obj
-					logging.info(f"Discovered {base_class.__name__}: '{key}' -> {name}")
+					key_name = getattr(obj, 'GENERATOR_TYPE', None) or name.replace(suffix, "").lower()
+					module_map[key_name] = obj
+					logger.info(f"Discovered {base_class.__name__}: '{key_name}' -> {name}")
 		except Exception as e:
-			logging.error(f"Failed to import or inspect module {module_info.name}: {e}")
+			logger.error(f"Failed to import or inspect module {module_info.name}: {e}")
 
 	if not module_map:
+		logger.critical(f"No modules found for {base_class.__name__} in '{package_name}'.")
 		raise ImportError(f"No modules found for {base_class.__name__} in '{package_name}'.")
 
 	return module_map
@@ -99,6 +128,13 @@ def setup_arg_parser(gen_choices: list, llm_choices: list) -> argparse.ArgumentP
 		action='store_true',
 		help="Enable self-correction mode. The LLM will attempt to fix its own JSON errors."
 	)
+	parser.add_argument(
+		'--log-level',
+		type=str,
+		default=settings.logging.DEFAULT_LEVEL,
+		choices=['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
+		help='Set the logging level for the application.'
+	)
 	return parser
 
 
@@ -106,10 +142,17 @@ async def main() -> None:
 	"""
 	메인 실행 함수. 의존성을 생성 및 주입하고, 전체 파이프라인을 실행한다.
 	"""
-	setup_logging()
+	# 인자 파싱을 로깅 설정보다 먼저 수행해야 함
+	# 임시로 기본 파서만 만들어 log-level 인자만 먼저 파싱
+	temp_parser = argparse.ArgumentParser(add_help=False)
+	temp_parser.add_argument('--log-level', type=str, default=settings.logging.DEFAULT_LEVEL)
+	temp_args, _ = temp_parser.parse_known_args()
+
+	setup_logging(level=temp_args.log_level)
+	logger = logging.getLogger(__name__)
 
 	try:
-		# --- 1. 동적 탐색: 사용 가능한 모든 전문가들을 찾아낸다 ---
+		# --- 1. 동적 탐색 ---
 		import core.generators
 		import core.handlers.llm
 
@@ -124,9 +167,9 @@ async def main() -> None:
 
 		if args.self_correction:
 			settings.llm.ENABLE_SELF_CORRECTION = True
-			logging.info("Self-correction mode ENABLED by command-line argument.")
+			logger.info("Self-correction mode ENABLED by command-line argument.")
 
-		logging.info(f"Script execution started. Generation type: '{args.type}', LLM Handler: '{args.llm}'")
+		logger.info(f"Script execution started. Generation type: '{args.type}', LLM Handler: '{args.llm}'")
 
 		# --- 3. 의존성 생성 (Dependency Creation) ---
 		file_handler = FileHandler(
@@ -150,12 +193,12 @@ async def main() -> None:
 		# --- 5. 파이프라인 실행 ---
 		await generator.run(num_files=args.num_files)
 
-		logging.info("All tasks completed successfully. Shutting down.")
+		logger.info("All tasks completed successfully. Shutting down.")
 
 	except (ImportError, ValueError, FileNotFoundError) as e:
-		logging.critical(f"Initialization failed: {e}", exc_info=True)
+		logger.critical(f"Initialization failed: {e}", exc_info=True)
 	except Exception as e:
-		logging.critical(f"An unexpected critical error occurred: {e}", exc_info=True)
+		logger.critical(f"An unexpected critical error occurred: {e}", exc_info=True)
 
 
 if __name__ == "__main__":

@@ -9,6 +9,8 @@ from pydantic import ValidationError
 
 from schemas.datasets import ValidationSchema
 
+logger = logging.getLogger(__name__)
+
 class ProcessingResult:
 	"""
 	ResponseProcessor의 처리 결과를 담는 데이터 클래스.
@@ -32,7 +34,6 @@ class ResponseProcessor:
 	async def process_async(
 		response_text: str,
 		validation_schema: Type[ValidationSchema],
-		filename: str
 	) -> ProcessingResult:
 		"""
 		주어진 응답 텍스트에 대해 검증 및 복구 파이프라인을 비동기적으로 실행한다.
@@ -40,25 +41,28 @@ class ResponseProcessor:
 		Args:
 			response_text: API 핸들러로부터 받은 원본 텍스트 응답.
 			validation_schema: 응답을 검증할 Pydantic 스키마 클래스.
-			filename: 로깅을 위한 원본 파일명.
 
 		Returns:
 			처리의 최종 결과를 담은 ProcessingResult 객체.
 		"""
+		logger.debug(
+			f"Received raw response from LLM:\n---RAW RESPONSE START---\n{response_text[:500]}...\n---RAW RESPONSE END---")
+
 		# 1. 1차 검증 시도
 		try:
 			validated_data = validation_schema.model_validate_json(response_text)
-			logging.info(f"[{filename}] Success on first validation attempt.")
+			logger.info("Success on first validation attempt.")
 			return ProcessingResult(validated_data=validated_data)
 		except (json.JSONDecodeError, ValidationError) as e:
-			logging.warning(f"[{filename}] Initial validation failed. Attempting to repair JSON. Error: {e}")
-
+			logger.warning(f"Initial validation failed. Attempting to repair JSON. Error: {e}")
 		# 2. 1차 검증 실패 시, JSON 복구 시도
 		try:
 			repaired_json_str = repair_json(response_text)
+			logger.debug(
+				f"Repaired JSON string:\n---REPAIRED JSON START---\n{repaired_json_str}\n---REPAIRED JSON END---")
 			validated_data = validation_schema.model_validate_json(repaired_json_str)
-			logging.info(f"[{filename}] Successfully repaired and validated JSON.")
+			logger.info(f"Successfully repaired and validated JSON.")
 			return ProcessingResult(validated_data=validated_data)
 		except (json.JSONDecodeError, ValidationError) as repair_error:
-			logging.error(f"[{filename}] JSON repair failed. Error: {repair_error}")
+			logger.error(f"JSON repair failed. Error: {repair_error}")
 			return ProcessingResult(broken_text=response_text, needs_self_correction=True)
