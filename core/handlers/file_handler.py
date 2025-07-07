@@ -50,6 +50,12 @@ class FileHandler:
 		Returns:
 			결과물을 저장할 Path 객체.
 		"""
+		clean_filename = os.path.basename(original_filename)
+		if clean_filename != original_filename:
+			logger.error(f"Potential Path Traversal Attack detected! "
+			             f"Original: '{original_filename}', Cleaned: '{clean_filename}'")
+			raise ValueError(f"Invalid filename provided: {original_filename}")
+
 		output_dir = self.output_base_directory / generator_type
 		output_dir.mkdir(parents=True, exist_ok=True)
 
