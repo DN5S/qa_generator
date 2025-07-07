@@ -8,6 +8,7 @@ from json_repair import repair_json
 from pydantic import ValidationError
 
 from schemas.datasets import ValidationSchema
+from config.settings import settings
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +48,12 @@ class ResponseProcessor:
 		"""
 		logger.debug(
 			f"Received raw response from LLM:\n---RAW RESPONSE START---\n{response_text[:500]}...\n---RAW RESPONSE END---")
+
+		max_size = settings.llm.MAX_RESPONSE_SIZE_MB * 1024 * 1024
+		if len(response_text.encode('utf-8')) > max_size:
+			logger.error(f"Response size exceeds the limit of {settings.llm.MAX_RESPONSE_SIZE_MB}MB. "
+			             f"Size: {len(response_text.encode('utf-8'))} bytes. Aborting.")
+			return ProcessingResult(broken_text="Response too large.", needs_self_correction=False)
 
 		# 1. 1차 검증 시도
 		try:

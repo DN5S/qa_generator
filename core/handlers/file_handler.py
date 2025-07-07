@@ -1,5 +1,6 @@
 # core/handlers/file_handler.py
 
+import os
 import asyncio
 import logging
 from pathlib import Path
