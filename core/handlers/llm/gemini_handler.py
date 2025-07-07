@@ -22,7 +22,8 @@ class GeminiHandler(BaseLLMHandler):
 			# API 키가 비어있는 경우 명시적인 오류 발생
 			if not self.settings.llm.GEMINI_API_KEY:
 				raise ValueError("GEMINI_API_KEY is not set in the environment or .env file.")
-			self.client = genai.Client(api_key=self.settings.llm.GEMINI_API_KEY)
+			api_key_str = self.settings.llm.GEMINI_API_KEY.get_secret_value()
+			self.client = genai.Client(api_key=api_key_str)
 			logger.info("Gemini client initialized successfully.")
 		except (ValueError, Exception) as e:
 			logger.critical(f"Failed to initialize Gemini client: {e}")

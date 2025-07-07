@@ -1,5 +1,6 @@
 # core/handlers/file_handler.py
 
+import os
 import asyncio
 import logging
 from pathlib import Path
@@ -50,10 +51,16 @@ class FileHandler:
 		Returns:
 			결과물을 저장할 Path 객체.
 		"""
+		clean_filename = os.path.basename(original_filename)
+		if clean_filename != original_filename:
+			logger.error(f"Potential Path Traversal Attack detected! "
+			             f"Original: '{original_filename}', Cleaned: '{clean_filename}'")
+			raise ValueError(f"Invalid filename provided: {original_filename}")
+
 		output_dir = self.output_base_directory / generator_type
 		output_dir.mkdir(parents=True, exist_ok=True)
 
-		stem = Path(original_filename).stem
+		stem = Path(clean_filename).stem
 		if is_broken:
 			filename = settings.paths.BROKEN_FILENAME_TEMPLATE.format(stem=stem)
 		else:
