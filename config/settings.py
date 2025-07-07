@@ -7,6 +7,35 @@ from typing import Final
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+def _ensure_env_file_exists() -> None:
+    """
+    .env 파일이 존재하지 않으면 기본값으로 생성한다.
+    최초 실행 시 필요한 환경 변수들을 포함한 .env 파일을 생성한다.
+    """
+    env_file_path = Path(".env")
+
+    if not env_file_path.exists():
+        print("Warning: .env file not found. Creating default .env file...")
+
+        default_env_content = '''
+        LLM_GEMINI_API_KEY=""
+        LLM_GEN_TEMPERATURE=1
+        LLM_GEN_TOP_P=0.95
+        LLM_GEN_MAX_OUTPUT_TOKENS=8192
+        '''
+
+        try:
+            with open(env_file_path, 'w', encoding='utf-8') as f:
+                f.write(default_env_content)
+            print(f"Success: Created .env file at {env_file_path.absolute()}")
+            print("Note: Please update LLM_GEMINI_API_KEY with your actual API key.")
+        except Exception as e:
+            print(f"Error: Failed to create .env file: {e}")
+            raise
+
+# Ensure .env file exists before defining Settings classes
+_ensure_env_file_exists()
+
 GEMINI_FLASH_MODEL: Final[str] = "gemini-2.0-flash"
 GEMINI_PRO_MODEL: Final[str] = "gemini-1.5-pro"
 
@@ -35,6 +64,11 @@ class LLMSettings(BaseSettings):
     MAX_RESPONSE_SIZE_MB: int = Field(default=1, description="처리할 최대 응답 크기(MB). DoS 공격 방지용.")
     ENABLE_SELF_CORRECTION: bool = Field(default=False,
                                          description="API 응답이 유효하지 않은 JSON일 경우, LLM에게 자가 수정을 요청하는 기능을 활성화한다.")
+
+    # Generation parameters
+    GEN_TEMPERATURE: float = Field(default=1.0, description="LLM 생성 시 사용할 temperature 값.")
+    GEN_TOP_P: float = Field(default=0.95, description="LLM 생성 시 사용할 top_p 값.")
+    GEN_MAX_OUTPUT_TOKENS: int = Field(default=8192, description="LLM 생성 시 최대 출력 토큰 수.")
 
 class MetadataSettings(BaseSettings):
     """생성될 데이터셋의 메타데이터 기본값을 관리한다."""

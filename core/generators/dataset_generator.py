@@ -275,6 +275,7 @@ class DatasetGenerator(ABC):
 
         FileHandler를 통해 처리할 파일 목록을 가져오고, 각 파일에 대한
         파이프라인 실행을 비동기 태스크로 만들어 병렬 처리한다.
+        MAX_CONCURRENT_REQUESTS 설정에 따라 동시 요청 수를 제한한다.
 
         Args:
             num_files: 처리할 최대 파일 수. None이면 모든 파일을 처리한다.
@@ -285,6 +286,16 @@ class DatasetGenerator(ABC):
 		if not files_to_process:
 			return
 
-		tasks = [self.execute_pipeline_for_file(filepath, i + 1) for i, filepath in enumerate(files_to_process)]
+		# 동시성 제어를 위한 세마포어 생성
+		max_concurrent = self.settings.llm.MAX_CONCURRENT_REQUESTS
+		semaphore = asyncio.Semaphore(max_concurrent)
+		logger.info(f"Processing {len(files_to_process)} files with max {max_concurrent} concurrent requests.")
+
+		async def process_file_with_semaphore(filepath, file_index):
+			"""세마포어로 동시성을 제어하면서 파일을 처리한다."""
+			async with semaphore:
+				await self.execute_pipeline_for_file(filepath, file_index)
+
+		tasks = [process_file_with_semaphore(filepath, i + 1) for i, filepath in enumerate(files_to_process)]
 		await asyncio.gather(*tasks)
 		logger.info("All file processing pipelines have been completed.")
