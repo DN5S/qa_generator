@@ -36,6 +36,7 @@ app = typer.Typer(
 )
 console = Console()
 
+
 def setup_logging(level: str, settings: Settings) -> None:
 	"""
 	애플리케이션의 로깅 시스템을 초기화한다.
@@ -385,7 +386,7 @@ def interactive() -> None:
 
 		# 3. 파일 수 제한 설정
 		console.print("[cyan]3. Set file processing limit:[/cyan]")
-		limit_files = questionary.confirm("Do you want to limit the number of files?", default=False).ask()
+		limit_files = questionary.confirm("Limiting the number of files?", default=False).ask()
 
 		if limit_files is None:
 			console.print("[yellow]Operation cancelled.[/yellow]")
@@ -410,7 +411,7 @@ def interactive() -> None:
 
 		# 4. 자체 수정 모드 설정
 		console.print("[cyan]4. Configure self-correction mode:[/cyan]")
-		self_correction = questionary.confirm("Do you want to enable self-correction mode?", default=False).ask()
+		self_correction = questionary.confirm("Enable self-correction mode?", default=False).ask()
 
 		if self_correction is None:
 			console.print("[yellow]Operation cancelled.[/yellow]")
