@@ -2,13 +2,15 @@
 
 from typing import List, Type
 from core.generators.dataset_generator import DatasetGenerator
+from core.registry import registry
 from schemas.datasets import ValidationSchema, Metadata, MultiTurnQA, MultiTurnConversation, MultiTurnLLMOutput
 
+@registry.register_generator("multiturn")
 class MultiTurnGenerator(DatasetGenerator):
     """
     Multi-Turn QA 데이터셋을 생성하는 구체적인 구현체.
     """
-    GENERATOR_TYPE = "multiturn"
+    # GENERATOR_TYPE = "multiturn"
 
     def _get_validation_schema(self) -> Type[ValidationSchema]:
         return MultiTurnLLMOutput
