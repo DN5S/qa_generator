@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import List, Optional, Union, Sequence
 
 from schemas.datasets import ValidationSchema
-from config.settings import settings
+from config.settings import Settings
 
 logger = logging.getLogger(__name__)
 
@@ -17,16 +17,18 @@ class FileHandler:
 	SRP 원칙에 따라 파일 관련 모든 책임을 이 클래스로 위임.
 	"""
 
-	def __init__(self, data_directory: Path, output_base_directory: Path):
+	def __init__(self, data_directory: Path, output_base_directory: Path, settings: Settings):
 		"""
 		FileHandler를 초기화한다.
 
 		Args:
 			data_directory: 원본 문서 파일(들)이 있는 디렉토리.
 			output_base_directory: 모든 결과물이 저장될 최상위 디렉토리.
+			settings: 애플리케이션 설정 객체.
 		"""
 		self.data_directory = data_directory
 		self.output_base_directory = output_base_directory
+		self.settings = settings
 		self._setup_directories()
 
 	def _setup_directories(self) -> None:
@@ -62,9 +64,9 @@ class FileHandler:
 
 		stem = Path(clean_filename).stem
 		if is_broken:
-			filename = settings.paths.BROKEN_FILENAME_TEMPLATE.format(stem=stem)
+			filename = self.settings.paths.BROKEN_FILENAME_TEMPLATE.format(stem=stem)
 		else:
-			filename = settings.paths.QA_FILENAME_TEMPLATE.format(stem=stem)
+			filename = self.settings.paths.QA_FILENAME_TEMPLATE.format(stem=stem)
 
 		path = output_dir / filename
 		logger.debug(f"Generated output path: {path}")

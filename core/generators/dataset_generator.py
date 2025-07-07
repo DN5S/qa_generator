@@ -235,7 +235,7 @@ class DatasetGenerator(ABC):
 
 			# 4. 1차 응답 처리 (ResponseProcessor 위임)
 			validation_schema = self._get_validation_schema()
-			result = await self.response_processor.process_async(response_text, validation_schema)
+			result = await self.response_processor.process_async(response_text, validation_schema, self.settings)
 
 			# 5. 결과에 따른 분기 처리
 			if result.is_successful:
@@ -250,7 +250,7 @@ class DatasetGenerator(ABC):
 				corrected_response_text = await self.llm_handler.generate_async(correction_prompt)
 				if corrected_response_text:
 					corrected_result = await self.response_processor.process_async(
-						corrected_response_text, self._get_validation_schema()
+						corrected_response_text, self._get_validation_schema(), self.settings
 					)
 					if corrected_result.is_successful:
 						logger.info("Self-correction successful.")
