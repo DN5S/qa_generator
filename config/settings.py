@@ -59,6 +59,3 @@ class Settings(BaseSettings):
     llm: LLMSettings = LLMSettings()
     metadata: MetadataSettings = MetadataSettings()
     logging: LoggingSettings = LoggingSettings()
-
-# 애플리케이션 전역에서 사용될 설정(Settings) 클래스의 싱글톤 인스턴스.
-settings = Settings()

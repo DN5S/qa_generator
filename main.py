@@ -6,7 +6,7 @@ import logging
 from datetime import datetime
 from typing import Type, TypeAlias
 
-from config.settings import Settings, settings as global_settings
+from config.settings import Settings
 from config.logging_config import ContextFilter
 from config.app_config import AppConfig
 from core.generators.dataset_generator import DatasetGenerator
@@ -19,18 +19,19 @@ from core.registry import registry
 GeneratorClass: TypeAlias = Type[DatasetGenerator]
 LLMHandlerClass: TypeAlias = Type[BaseLLMHandler]
 
-def setup_logging(level: str) -> None:
+def setup_logging(level: str, settings: Settings) -> None:
 	"""
 	애플리케이션의 로깅 시스템을 초기화한다.
 	로그는 파일(processing.log)과 콘솔 스트림으로 동시에 출력된다.
 	Args:
 		level: 로그 레벨
+		settings: 애플리케이션 설정 객체
 	"""
 	# 1. 로그 레벨 설정
 	log_level = getattr(logging, level.upper(), logging.INFO)
 
 	# 2. 로그 디렉토리 생성
-	log_dir = global_settings.paths.LOGS_DIRECTORY
+	log_dir = settings.paths.LOGS_DIRECTORY
 	log_dir.mkdir(parents=True, exist_ok=True)
 
 	# 3. 타임스탬프 기반 로그 파일명 생성
@@ -122,7 +123,10 @@ async def main() -> None:
 	temp_parser.add_argument('--log-level', type=str, default='INFO')
 	temp_args, _ = temp_parser.parse_known_args()
 
-	setup_logging(level=temp_args.log_level)
+	# --- 0. 설정 객체 생성 ---
+	settings = Settings()
+
+	setup_logging(level=temp_args.log_level, settings=settings)
 	logger = logging.getLogger(__name__)
 
 	try:
@@ -135,12 +139,13 @@ async def main() -> None:
 
 		# --- 3. 의존성 컨테이너 생성 ---
 		app_config = AppConfig(
-			settings=global_settings,
+			settings=settings,
 			file_handler=FileHandler(
-				data_directory=global_settings.paths.DATA_DIRECTORY,
-				output_base_directory=global_settings.paths.OUTPUT_BASE_DIRECTORY
+				data_directory=settings.paths.DATA_DIRECTORY,
+				output_base_directory=settings.paths.OUTPUT_BASE_DIRECTORY,
+				settings=settings
 			),
-			template_manager=PromptTemplateManager(global_settings.paths.PROMPTS_DIRECTORY)
+			template_manager=PromptTemplateManager(settings.paths.PROMPTS_DIRECTORY)
 		)
 
 		if args.self_correction:

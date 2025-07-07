@@ -8,7 +8,7 @@ from json_repair import repair_json
 from pydantic import ValidationError
 
 from schemas.datasets import ValidationSchema
-from config.settings import settings
+from config.settings import Settings
 
 logger = logging.getLogger(__name__)
 
@@ -35,6 +35,7 @@ class ResponseProcessor:
 	async def process_async(
 		response_text: str,
 		validation_schema: Type[ValidationSchema],
+		settings: Settings,
 	) -> ProcessingResult:
 		"""
 		주어진 응답 텍스트에 대해 검증 및 복구 파이프라인을 비동기적으로 실행한다.
@@ -42,6 +43,7 @@ class ResponseProcessor:
 		Args:
 			response_text: API 핸들러로부터 받은 원본 텍스트 응답.
 			validation_schema: 응답을 검증할 Pydantic 스키마 클래스.
+			settings: 애플리케이션 설정 객체.
 
 		Returns:
 			처리의 최종 결과를 담은 ProcessingResult 객체.
