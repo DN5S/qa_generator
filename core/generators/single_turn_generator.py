@@ -2,13 +2,14 @@
 
 from typing import List, Type
 from core.generators.dataset_generator import DatasetGenerator
+from core.registry import registry
 from schemas.datasets import ValidationSchema, Metadata, SingleTurnQA, SingleTurnLLMOutput
 
+@registry.register_generator("singleturn")
 class SingleTurnGenerator(DatasetGenerator):
 	"""
 	단일 질문-답변(Single-Turn QA) 데이터셋을 생성하는 구현체.
 	"""
-	GENERATOR_TYPE = "singleturn"
 
 	def _get_extra_template_args(self) -> dict:
 		"""Single-turn 생성에 필요한 instruction 후보 목록을 반환한다."""

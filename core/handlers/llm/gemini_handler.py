@@ -9,9 +9,11 @@ from google.genai.types import GenerateContentConfig, GenerateContentResponse
 
 from config.settings import Settings
 from core.handlers.llm.base_handler import BaseLLMHandler
+from core.registry import registry
 
 logger = logging.getLogger(__name__)
 
+@registry.register_handler("gemini")
 class GeminiHandler(BaseLLMHandler):
 	"""Gemini API와의 통신을 책임지는 구체적인 핸들러."""
 

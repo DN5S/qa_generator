@@ -7,12 +7,10 @@ from datetime import date
 from pathlib import Path
 from typing import Dict, Type, Optional, List
 
-from config.settings import Settings
 from config.logging_config import context_filename
-from core.handlers.file_handler import FileHandler
+from config.app_config import AppConfig
 from core.handlers.llm.base_handler import BaseLLMHandler
 from core.processors.response_processor import ResponseProcessor
-from core.prompt_manager import PromptTemplateManager
 import schemas.datasets as dataset_schemas
 from schemas.datasets import ValidationSchema, Metadata
 
@@ -26,30 +24,28 @@ class DatasetGenerator(ABC):
 	위임하고, 자신은 전체 데이터 생성 흐름을 조율(Orchestration)하는 책임만 맡는다.
 	구체적인 제너레이터(SingleTurn, CoT 등)는 이 클래스를 상속받아 구현된다.
 	"""
-	GENERATOR_TYPE: str = ""
 	_validation_schema_map: Dict[str, Type[ValidationSchema]] = {}
 
-	def __init__(self, settings: Settings, file_handler: FileHandler, llm_handler: BaseLLMHandler,
-	             template_manager: PromptTemplateManager):
+	def __init__(self, config: AppConfig, llm_handler: BaseLLMHandler, generator_type: str):
 			"""
-			DatasetGenerator를 초기화한다.
-
+			DatasetGenerator 초기화.
 			의존성 주입(Dependency Injection)을 통해 필요한 모듈들을 주입받는다.
-
 			Args:
-				settings: 애플리케이션의 전역 설정 객체.
-				file_handler: 파일 시스템 I/O를 담당하는 핸들러.
+				config: 애플리케이션의 전역 설정 객체.
+					- file_handler: 파일 시스템 I/O를 담당하는 핸들러.
+					- template_manager: 프롬프트 템플릿을 관리하는 매니저.
 				llm_handler: LLM API 통신을 담당하는 핸들러.
-				template_manager: 프롬프트 템플릿을 관리하는 매니저.
 			"""
-			if not self.GENERATOR_TYPE:
+			if not generator_type:
 				raise NotImplementedError(f"{self.__class__.__name__} must define a GENERATOR_TYPE.")
 
-			self.settings = settings
-			self.file_handler = file_handler
+			self.type = generator_type
+			self.config = config
+			self.settings = config.settings
+			self.file_handler = config.file_handler
+			self.template_manager = config.template_manager
 			self.llm_handler = llm_handler
 			self.response_processor = ResponseProcessor()
-			self.template_manager = template_manager
 
 			if not self.__class__._validation_schema_map:
 				self.__class__._build_validation_schema_map()
@@ -60,7 +56,7 @@ class DatasetGenerator(ABC):
 	@property
 	def _get_prompt_path(self) -> Path:
 		"""프롬프트 템플릿 파일의 경로를 반환해야 한다."""
-		return self.settings.paths.PROMPTS_DIRECTORY / self.GENERATOR_TYPE / "prompt.md"
+		return self.settings.paths.PROMPTS_DIRECTORY / self.type / "prompt.md"
 
 	@property
 	def _get_schema_template_name(self) -> str:
@@ -187,12 +183,12 @@ class DatasetGenerator(ABC):
 	def _create_metadata(self, filepath: Path, file_index: int) -> Metadata:
 		""" 프로그래밍 방식으로 메타데이터 객체를 생성한다. """
 		metadata = Metadata(
-			identifier=f"{filepath.stem}_{self.GENERATOR_TYPE}_{file_index:05d}",
+			identifier=f"{filepath.stem}_{self.type}_{file_index:05d}",
 			dataset_version=self.settings.metadata.DATASET_VERSION,
 			creator=self.settings.metadata.CREATOR,
 			created_date=date.today(),
 			source_document_id=filepath.name,
-			subject=[self.GENERATOR_TYPE]  # 추후 확장 가능
+			subject=[self.type]  # 추후 확장 가능
 		)
 		logger.debug(f"Created metadata: {metadata.model_dump_json()}")
 		return metadata
@@ -207,7 +203,7 @@ class DatasetGenerator(ABC):
 		final_data = self._assemble_final_data(llm_output, metadata, document_lines)
 		logger.debug(f"Assembled final data for saving: {final_data.model_dump_json(indent=2)[:500]}...")
 
-		output_path = self.file_handler.get_output_path(self.GENERATOR_TYPE, filepath.name)
+		output_path = self.file_handler.get_output_path(self.type, filepath.name)
 		await self.file_handler.write_file_async(output_path, final_data)
 
 	async def execute_pipeline_for_file(self, filepath: Path, file_index: int) -> None:

@@ -2,20 +2,20 @@
 
 import argparse
 import asyncio
-import importlib
-import inspect
 import logging
-import pkgutil
 from datetime import datetime
-from typing import Dict, Type, TypeAlias
+from typing import Type, TypeAlias
 
-from config.settings import settings
+from config.settings import Settings, settings as global_settings
 from config.logging_config import ContextFilter
+from config.app_config import AppConfig
 from core.generators.dataset_generator import DatasetGenerator
 from core.handlers.file_handler import FileHandler
 from core.handlers.llm.base_handler import BaseLLMHandler
 from core.prompt_manager import PromptTemplateManager
+from core.registry import registry
 
+# --- Type Aliases ---
 GeneratorClass: TypeAlias = Type[DatasetGenerator]
 LLMHandlerClass: TypeAlias = Type[BaseLLMHandler]
 
@@ -30,7 +30,7 @@ def setup_logging(level: str) -> None:
 	log_level = getattr(logging, level.upper(), logging.INFO)
 
 	# 2. 로그 디렉토리 생성
-	log_dir = settings.paths.LOGS_DIRECTORY
+	log_dir = global_settings.paths.LOGS_DIRECTORY
 	log_dir.mkdir(parents=True, exist_ok=True)
 
 	# 3. 타임스탬프 기반 로그 파일명 생성
@@ -63,39 +63,6 @@ def setup_logging(level: str) -> None:
 	initial_logger.info("Logging system initialized.")
 	initial_logger.info("========================================")
 
-
-def discover_modules(package_path, package_name, base_class, suffix) -> Dict[str, Type]:
-	"""
-	지정된 패키지에서 특정 베이스 클래스를 상속하는 모듈들을 동적으로 탐색한다.
-
-	Args:
-		package_path: 탐색할 패키지의 경로.
-		package_name: 패키지의 이름.
-		base_class: 찾아야 할 부모 클래스.
-		suffix: 클래스 이름에서 제거할 접미사.
-
-	Returns:
-		{키: 클래스} 형태의 딕셔너리.
-	"""
-	module_map: Dict[str, Type] = {}
-	logger = logging.getLogger(__name__)
-
-	for module_info in pkgutil.walk_packages(package_path, f"{package_name}."):
-		try:
-			module = importlib.import_module(module_info.name)
-			for name, obj in inspect.getmembers(module, inspect.isclass):
-				if issubclass(obj, base_class) and obj is not base_class:
-					key_name = getattr(obj, 'GENERATOR_TYPE', None) or name.replace(suffix, "").lower()
-					module_map[key_name] = obj
-					logger.info(f"Discovered {base_class.__name__}: '{key_name}' -> {name}")
-		except Exception as e:
-			logger.error(f"Failed to import or inspect module {module_info.name}: {e}")
-
-	if not module_map:
-		logger.critical(f"No modules found for {base_class.__name__} in '{package_name}'.")
-		raise ImportError(f"No modules found for {base_class.__name__} in '{package_name}'.")
-
-	return module_map
 
 def setup_arg_parser(gen_choices: list, llm_choices: list) -> argparse.ArgumentParser:
 	"""스크립트 실행을 위한 명령행 인터페이스(CLI) 인자를 설정하고 반환한다."""
@@ -131,12 +98,19 @@ def setup_arg_parser(gen_choices: list, llm_choices: list) -> argparse.ArgumentP
 	parser.add_argument(
 		'--log-level',
 		type=str,
-		default=settings.logging.DEFAULT_LEVEL,
+		default='INFO',
 		choices=['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'],
 		help='Set the logging level for the application.'
 	)
 	return parser
 
+def discover_and_register_components() -> None:
+	"""
+	'core' 패키지를 탐색하여 모든 제너레이터와 핸들러를
+	레지스트리에 자동으로 등록한다.
+	"""
+	registry.discover_components("core.generators")
+	registry.discover_components("core.handlers.llm")
 
 async def main() -> None:
 	"""
@@ -145,49 +119,46 @@ async def main() -> None:
 	# 인자 파싱을 로깅 설정보다 먼저 수행해야 함
 	# 임시로 기본 파서만 만들어 log-level 인자만 먼저 파싱
 	temp_parser = argparse.ArgumentParser(add_help=False)
-	temp_parser.add_argument('--log-level', type=str, default=settings.logging.DEFAULT_LEVEL)
+	temp_parser.add_argument('--log-level', type=str, default='INFO')
 	temp_args, _ = temp_parser.parse_known_args()
 
 	setup_logging(level=temp_args.log_level)
 	logger = logging.getLogger(__name__)
 
 	try:
-		# --- 1. 동적 탐색 ---
-		import core.generators
-		import core.handlers.llm
-
-		generator_map = discover_modules(core.generators.__path__, core.generators.__name__, DatasetGenerator,
-		                                 "Generator")
-		llm_handler_map = discover_modules(core.handlers.llm.__path__, core.handlers.llm.__name__, BaseLLMHandler,
-		                                   "Handler")
+		# --- 1. 컴포넌트 자동 등록 ---
+		discover_and_register_components()
 
 		# --- 2. 명령행 인자 설정 및 파싱 ---
-		parser = setup_arg_parser(list(generator_map.keys()), list(llm_handler_map.keys()))
+		parser = setup_arg_parser(list(registry.generators.keys()), list(registry.handlers.keys()))
 		args = parser.parse_args()
 
+		# --- 3. 의존성 컨테이너 생성 ---
+		app_config = AppConfig(
+			settings=global_settings,
+			file_handler=FileHandler(
+				data_directory=global_settings.paths.DATA_DIRECTORY,
+				output_base_directory=global_settings.paths.OUTPUT_BASE_DIRECTORY
+			),
+			template_manager=PromptTemplateManager(global_settings.paths.PROMPTS_DIRECTORY)
+		)
+
 		if args.self_correction:
-			settings.llm.ENABLE_SELF_CORRECTION = True
+			app_config.settings.llm.ENABLE_SELF_CORRECTION = True
 			logger.info("Self-correction mode ENABLED by command-line argument.")
 
 		logger.info(f"Script execution started. Generation type: '{args.type}', LLM Handler: '{args.llm}'")
 
-		# --- 3. 의존성 생성 (Dependency Creation) ---
-		file_handler = FileHandler(
-			data_directory=settings.paths.DATA_DIRECTORY,
-			output_base_directory=settings.paths.OUTPUT_BASE_DIRECTORY
-		)
+		# --- 4. 동적 의존성 선택 및 주입 ---
+		# 레지스트리에서 필요한 클래스를 가져온다.
+		llm_handler_class = registry.handlers[args.llm]
+		generator_class = registry.generators[args.type]
 
-		llm_handler_class = llm_handler_map[args.llm]
-		llm_handler: BaseLLMHandler = llm_handler_class(settings)
-		template_manager = PromptTemplateManager(settings.paths.PROMPTS_DIRECTORY)
-
-		# --- 4. 의존성 주입 (Dependency Injection) ---
-		generator_class = generator_map[args.type]
+		llm_handler: BaseLLMHandler = llm_handler_class(app_config.settings)
 		generator = generator_class(
-			settings=settings,
-			file_handler=file_handler,
+			config=app_config,  # 이제 설정 객체 대신 컨테이너를 주입
 			llm_handler=llm_handler,
-			template_manager=template_manager
+			generator_type=args.type
 		)
 
 		# --- 5. 파이프라인 실행 ---
