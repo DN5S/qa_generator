@@ -224,6 +224,7 @@ async def _generate_async(
 async def _run_with_progress(generator: DatasetGenerator, num_files: Optional[int]) -> None:
 	"""
 	프로그래스 바와 함께 데이터셋 생성을 병렬로 실행한다.
+	MAX_CONCURRENT_REQUESTS 설정에 따라 동시 요청 수를 제한한다.
 	"""
 	# 처리할 파일 목록 가져오기
 	files_to_process = generator.file_handler.find_files(num_files=num_files)
@@ -233,7 +234,11 @@ async def _run_with_progress(generator: DatasetGenerator, num_files: Optional[in
 		return
 
 	total_files = len(files_to_process)
-	console.print(f"Processing {total_files} files concurrently.")
+	max_concurrent = generator.config.settings.llm.MAX_CONCURRENT_REQUESTS
+	console.print(f"Processing {total_files} files with max {max_concurrent} concurrent requests.")
+
+	# 동시성 제어를 위한 세마포어 생성
+	semaphore = asyncio.Semaphore(max_concurrent)
 
 	# 프로그래스 바 설정
 	with Progress(console=console) as progress:
@@ -248,29 +253,30 @@ async def _run_with_progress(generator: DatasetGenerator, num_files: Optional[in
 		failed_files = 0
 
 		async def process_file_with_progress(filepath, file_index):
-			"""개별 파일 처리 및 프로그래스 바 업데이트"""
+			"""개별 파일 처리 및 프로그래스 바 업데이트 (세마포어로 동시성 제어)"""
 			nonlocal completed_files, failed_files
 
-			try:
-				await generator.execute_pipeline_for_file(filepath, file_index)
-				async with progress_lock:
-					completed_files += 1
-					progress.update(
-						task,
-						advance=1,
-						description=f"[green]Completed: {completed_files}[/green] | [red]Failed: {failed_files}[/red] | Current: {filepath.name}"
-					)
-			except Exception as e:
-				async with progress_lock:
-					failed_files += 1
-					progress.update(
-						task,
-						advance=1,
-						description=f"[green]Completed: {completed_files}[/green] | [red]Failed: {failed_files}[/red] | [red]Error: {filepath.name}[/red]"
-					)
-				logging.getLogger(__name__).error(f"파일 처리 실패 {filepath}: {e}")
+			async with semaphore:  # 세마포어로 동시 요청 수 제한
+				try:
+					await generator.execute_pipeline_for_file(filepath, file_index)
+					async with progress_lock:
+						completed_files += 1
+						progress.update(
+							task,
+							advance=1,
+							description=f"[green]Completed: {completed_files}[/green] | [red]Failed: {failed_files}[/red] | Current: {filepath.name}"
+						)
+				except Exception as e:
+					async with progress_lock:
+						failed_files += 1
+						progress.update(
+							task,
+							advance=1,
+							description=f"[green]Completed: {completed_files}[/green] | [red]Failed: {failed_files}[/red] | [red]Error: {filepath.name}[/red]"
+						)
+					logging.getLogger(__name__).error(f"파일 처리 실패 {filepath}: {e}")
 
-		# 모든 파일을 병렬로 처리
+		# 모든 파일을 병렬로 처리 (세마포어로 동시성 제어)
 		tasks = [
 			process_file_with_progress(filepath, i + 1)
 			for i, filepath in enumerate(files_to_process)
