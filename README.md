@@ -22,7 +22,7 @@
 
 ## Installation
 ```bash
-git clone http://app.xten.co.kr:15300/develop/qa_generator.git
+git clone https://github.com/DN5S/qa_generator.git
 cd qa-generator
 ```
 
