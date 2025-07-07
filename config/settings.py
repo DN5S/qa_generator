@@ -4,19 +4,11 @@ from enum import Enum
 from pathlib import Path
 from typing import Final
 
-
-# ================
-# --- 상수 정의 ---
-# ================
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 GEMINI_FLASH_MODEL: Final[str] = "gemini-2.0-flash"
 GEMINI_PRO_MODEL: Final[str] = "gemini-1.5-pro"
-
-# ======================
-# --- 설정 클래스 정의 ---
-# ======================
 
 class GeminiModels(str, Enum):
     FLASH = GEMINI_FLASH_MODEL
@@ -27,7 +19,7 @@ class PathSettings(BaseSettings):
     DATA_DIRECTORY: Path = BASE_DIR / "data/input"
     PROMPTS_DIRECTORY: Path = BASE_DIR / "prompts"
     OUTPUT_BASE_DIRECTORY: Path = BASE_DIR / "data/output"
-
+    LOGS_DIRECTORY: Path = BASE_DIR / "logs"
     QA_FILENAME_TEMPLATE: str = "{stem}_qa.json"
     BROKEN_FILENAME_TEMPLATE: str = "{stem}_qa_broken.txt"
 
@@ -49,6 +41,11 @@ class MetadataSettings(BaseSettings):
     DATASET_VERSION: str = Field(default="1.0", description="데이터셋의 버전.")
     CREATOR: str = Field(default="㈜엑스텐정보", description="데이터 생성 기관.")
 
+class LoggingSettings(BaseSettings):
+    """로깅 관련 설정을 관리한다."""
+    model_config = SettingsConfigDict(env_prefix='LOGGING_')
+    DEFAULT_LEVEL: str = Field(default="INFO", description="기본 로그 레벨 (DEBUG, INFO, WARNING, ERROR, CRITICAL)")
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file='.env',
@@ -60,6 +57,7 @@ class Settings(BaseSettings):
     paths: PathSettings = PathSettings()
     llm: LLMSettings = LLMSettings()
     metadata: MetadataSettings = MetadataSettings()
+    logging: LoggingSettings = LoggingSettings()
 
 # 애플리케이션 전역에서 사용될 설정(Settings) 클래스의 싱글톤 인스턴스.
 settings = Settings()

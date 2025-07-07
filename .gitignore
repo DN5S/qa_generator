@@ -285,3 +285,4 @@ pyrightconfig.json
 
 # Project Specific
 data/
+logs/

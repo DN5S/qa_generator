@@ -3,6 +3,8 @@
 import logging
 from pathlib import Path
 
+logger = logging.getLogger(__name__)
+
 class PromptTemplateManager:
     _templates: dict[str, str] = {}
 
@@ -12,10 +14,10 @@ class PromptTemplateManager:
         인스턴스는 호출자에 의해 생성 및 관리된다.
         """
         if not self._templates:
-            logging.info(f"Initializing PromptTemplateManager. Loading templates from '{template_directory}'...")
+            logger.info(f"Initializing PromptTemplateManager. Loading templates from '{template_directory}'...")
             self._templates = {}  # 인스턴스별 템플릿 딕셔너리 초기화
             self._load_all_templates(template_directory)
-            logging.info(f"Loaded {len(self._templates)} templates into cache.")
+            logger.info(f"Loaded {len(self._templates)} templates into cache.")
 
     def _load_all_templates(self, base_path: Path):
         """지정된 디렉터리와 하위 디렉터리에서 모든 템플릿 파일을 로드한다."""
@@ -24,13 +26,15 @@ class PromptTemplateManager:
             key = file_path.relative_to(base_path).as_posix()
             try:
                 self._templates[key] = file_path.read_text(encoding='utf-8')
+                logger.debug(f"Successfully loaded template: '{key}'")
             except Exception as e:
-                logging.error(f"Failed to load template: {file_path}. Error: {e}")
+                logger.error(f"Failed to load template: {file_path}. Error: {e}")
 
     def get_template(self, key: str) -> str:
         """캐시된 템플릿을 반환한다. 없으면 에러를 낸다."""
         template = self._templates.get(key)
         if template is None:
-            logging.error(f"FATAL: Template '{key}' not found in cache.")
+            logger.error(f"FATAL: Template '{key}' not found in cache.")
             raise KeyError(f"Template '{key}' not found.")
+        logger.debug(f"Retrieved template: '{key}'")
         return template

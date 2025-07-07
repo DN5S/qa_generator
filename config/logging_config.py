@@ -2,7 +2,6 @@
 
 import logging
 from contextvars import ContextVar
-from typing import Final
 
 # 컨텍스트 변수: 현재 처리 중인 파일명
 # 이 변수는 비동기 작업 간에 안전하게 격리된다.
