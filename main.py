@@ -8,7 +8,7 @@ from pathlib import Path
 
 import typer
 from rich.console import Console
-from rich.progress import Progress, TaskID
+from rich.progress import Progress, TaskID, TimeElapsedColumn, BarColumn, TextColumn, TaskProgressColumn
 from rich.table import Table
 from rich.prompt import Prompt, Confirm, IntPrompt
 from rich import print as rprint
@@ -240,8 +240,15 @@ async def _run_with_progress(generator: DatasetGenerator, num_files: Optional[in
 	# 동시성 제어를 위한 세마포어 생성
 	semaphore = asyncio.Semaphore(max_concurrent)
 
-	# 프로그래스 바 설정
-	with Progress(console=console) as progress:
+	# 프로그래스 바 설정 (경과 시간 표시, 1초마다 갱신)
+	with Progress(
+		TextColumn("[progress.description]{task.description}"),
+		BarColumn(),
+		TaskProgressColumn(),
+		TimeElapsedColumn(),
+		console=console,
+		refresh_per_second=1  # 1초마다 갱신
+	) as progress:
 		task = progress.add_task(
 			"[cyan]Processing files...",
 			total=total_files
