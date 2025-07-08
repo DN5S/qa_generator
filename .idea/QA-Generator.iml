@@ -13,7 +13,11 @@
   <component name="TemplatesService">
     <option name="TEMPLATE_FOLDERS">
       <list>
-        <option value="$MODULE_DIR$/templates" />
+        <option value="$MODULE_DIR$/prompts" />
+        <option value="$MODULE_DIR$/prompts/cot" />
+        <option value="$MODULE_DIR$/prompts/multiturn" />
+        <option value="$MODULE_DIR$/prompts/partials" />
+        <option value="$MODULE_DIR$/prompts/singleturn" />
       </list>
     </option>
   </component>
