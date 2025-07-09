@@ -4,14 +4,12 @@ import asyncio
 import logging
 from datetime import datetime
 from typing import Type, TypeAlias, Optional
-from pathlib import Path
 
 import typer
 from rich.console import Console
-from rich.progress import Progress, TaskID, TimeElapsedColumn, BarColumn, TextColumn, TaskProgressColumn
+from rich.progress import Progress, TimeElapsedColumn, BarColumn, TextColumn, TaskProgressColumn
 from rich.table import Table
-from rich.prompt import Prompt, Confirm, IntPrompt
-from rich import print as rprint
+
 import questionary
 
 from config.settings import Settings
@@ -30,7 +28,6 @@ LLMHandlerClass: TypeAlias = Type[BaseLLMHandler]
 # --- Typer 앱 인스턴스 생성 ---
 app = typer.Typer(
 	name="qa-generator",
-	help="AI 기반 QA 데이터셋 생성을 위한 강력한 도구입니다.",
 	add_completion=False,
 	rich_markup_mode="rich"
 )
@@ -129,8 +126,6 @@ def generate(
 ) -> None:
 	"""
 	Generate AI-based QA datasets.
-
-	A powerful tool for generating high-quality QA datasets from Markdown documents.
 	"""
 	asyncio.run(_generate_async(dataset_type, llm, num_files, self_correction, log_level, show_progress))
 
