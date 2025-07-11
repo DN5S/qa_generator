@@ -44,14 +44,26 @@ class ContextFilter(logging.Filter):
         if any(module in record.name for module in self.TYPER_MODULES):
             return False
 
-        # 2. 파일명 컨텍스트 추가
+        # 2. 외부 라이브러리의 잘못된 로그 메시지 포맷팅 방지
+        if hasattr(record, 'msg') and isinstance(record.msg, str):
+            # %s 포맷터가 있는데 args가 부족한 경우 수정
+            if '%s' in record.msg or '%d' in record.msg:
+                try:
+                    # 포맷팅을 미리 시도해보고 실패하면 안전한 메시지로 변경
+                    test_msg = record.msg % record.args if record.args else record.msg
+                except (TypeError, ValueError):
+                    # 포맷팅 오류가 발생하면 안전한 메시지로 변경
+                    record.msg = f"Logging format error in {record.name}: {record.msg}"
+                    record.args = ()
+
+        # 3. 파일명 컨텍스트 추가
         record.filename_context = context_filename.get()
 
-        # 3. 로그 메시지에서 이모지 및 특수문자 제거
+        # 4. 로그 메시지에서 이모지 및 특수문자 제거
         if hasattr(record, 'msg') and isinstance(record.msg, str):
             record.msg = self._remove_special_chars(record.msg)
 
-        # 4. 포맷된 메시지에서도 이모지 제거 (필요시)
+        # 5. 포맷된 메시지에서도 이모지 제거 (필요시)
         if hasattr(record, 'message') and isinstance(record.message, str):
             record.message = self._remove_special_chars(record.message)
 
@@ -63,10 +75,6 @@ class ContextFilter(logging.Filter):
         """
         # 이모지 제거
         text = self.EMOJI_PATTERN.sub('', text)
-
-        # 기타 특수 문자 제거 (선택적)
-        # 한글, 영문, 숫자, 기본 구두점만 유지
-        text = re.sub(r'[^\w\s가-힣.,!?:;()\[\]{}"\'`-]', '', text, flags=re.UNICODE)
 
         # 연속된 공백을 하나로 정리
         text = re.sub(r'\s+', ' ', text).strip()

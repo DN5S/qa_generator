@@ -12,7 +12,7 @@ from rich.table import Table
 
 import questionary
 
-from config.settings import Settings
+from config.settings import Settings, GeminiModels, OpenAIModels, ClaudeModels
 from config.logging_config import ContextFilter
 from config.app_config import AppConfig
 from core.generators.dataset_generator import DatasetGenerator
@@ -71,7 +71,10 @@ def setup_logging(level: str, settings: Settings) -> None:
 		handler.addFilter(context_filter)
 
 	logging.getLogger("httpx").setLevel(logging.WARNING)
+	logging.getLogger("httpcore").setLevel(logging.WARNING)
 	logging.getLogger("google_genai").setLevel(logging.WARNING)
+	logging.getLogger("anthropic").setLevel(logging.WARNING)
+	logging.getLogger("anthropic._base_client").setLevel(logging.WARNING)
 
 	initial_logger = logging.getLogger(__name__)
 	initial_logger.info("Logging system initialized.")
@@ -83,6 +86,35 @@ def get_available_choices() -> tuple[list[str], list[str]]:
 	컴포넌트 등록 후에 호출되어야 한다.
 	"""
 	return list(registry.generators.keys()), list(registry.handlers.keys())
+
+def get_available_models(llm_handler: str) -> list[str]:
+	"""
+	지정된 LLM 핸들러에서 사용 가능한 모델 목록을 반환한다.
+	"""
+	model_mapping = {
+		"gemini": [model.value for model in GeminiModels],
+		"openai": [model.value for model in OpenAIModels],
+		"claude": [model.value for model in ClaudeModels]
+	}
+	return model_mapping.get(llm_handler, [])
+
+def validate_model_for_handler(llm_handler: str, model: str) -> bool:
+	"""
+	지정된 LLM 핸들러에서 해당 모델이 사용 가능한지 확인한다.
+	"""
+	available_models = get_available_models(llm_handler)
+	return model in available_models
+
+def override_model_in_settings(settings: Settings, llm_handler: str, model: str) -> None:
+	"""
+	런타임에 지정된 LLM 핸들러의 모델 설정을 오버라이드한다.
+	"""
+	if llm_handler == "gemini":
+		settings.llm.GEMINI_MODEL = GeminiModels(model)
+	elif llm_handler == "openai":
+		settings.llm.OPENAI_MODEL = OpenAIModels(model)
+	elif llm_handler == "claude":
+		settings.llm.CLAUDE_MODEL = ClaudeModels(model)
 
 def discover_and_register_components() -> None:
 	"""
@@ -102,6 +134,11 @@ def generate(
 			None,
 			"--llm",
 			help="Specify the LLM handler to use."
+		),
+		model: str = typer.Option(
+			None,
+			"--model",
+			help="Specify the model to use within the selected LLM handler."
 		),
 		num_files: Optional[int] = typer.Option(
 			None,
@@ -127,12 +164,13 @@ def generate(
 	"""
 	Generate AI-based QA datasets.
 	"""
-	asyncio.run(_generate_async(dataset_type, llm, num_files, self_correction, log_level, show_progress))
+	asyncio.run(_generate_async(dataset_type, llm, model, num_files, self_correction, log_level, show_progress))
 
 
 async def _generate_async(
 		dataset_type: str,
 		llm: Optional[str],
+		model: Optional[str],
 		num_files: Optional[int],
 		self_correction: bool,
 		log_level: str,
@@ -171,6 +209,21 @@ async def _generate_async(
 			console.print(f"Available handlers: {', '.join(llm_choices)}")
 			raise typer.Exit(1)
 
+		# 모델 설정 (기본값 또는 검증)
+		available_models = get_available_models(llm)
+		if model is None:
+			# 기본 모델 사용 (설정에서 가져옴)
+			console.print(f"Using default model for {llm}")
+		else:
+			# 지정된 모델 검증
+			if not validate_model_for_handler(llm, model):
+				console.print(f"[red]Error:[/red] Unknown model '{model}' for handler '{llm}'")
+				console.print(f"Available models for {llm}: {', '.join(available_models)}")
+				raise typer.Exit(1)
+			console.print(f"Using specified model: {model}")
+			# 설정에서 모델 오버라이드
+			override_model_in_settings(settings, llm, model)
+
 		# --- 3. 의존성 컨테이너 생성 ---
 		app_config = AppConfig(
 			settings=settings,
@@ -186,7 +239,16 @@ async def _generate_async(
 			app_config.settings.llm.ENABLE_SELF_CORRECTION = True
 			logger.info("Self-correction mode ENABLED by command-line argument.")
 
-		console.print(f"Starting dataset generation: [bold blue]{dataset_type}[/bold blue], LLM: [bold green]{llm}[/bold green]")
+		# 현재 사용 중인 모델 정보 가져오기
+		current_model = None
+		if llm == "gemini":
+			current_model = settings.llm.GEMINI_MODEL.value
+		elif llm == "openai":
+			current_model = settings.llm.OPENAI_MODEL.value
+		elif llm == "claude":
+			current_model = settings.llm.CLAUDE_MODEL.value
+
+		console.print(f"Starting dataset generation: [bold blue]{dataset_type}[/bold blue], LLM: [bold green]{llm}[/bold green], Model: [bold yellow]{current_model}[/bold yellow]")
 
 		# --- 4. 동적 의존성 선택 및 주입 ---
 		llm_handler_class = registry.handlers[llm]
@@ -205,7 +267,7 @@ async def _generate_async(
 		else:
 			await generator.run(num_files=num_files)
 
-		console.print("[bold green]All tasks completed successfully![/bold green]")
+		console.print("[bold green]All tasks completed[/bold green]")
 
 	except (ImportError, ValueError, FileNotFoundError) as e:
 		logger.critical(f"Initialization failed: {e}", exc_info=True)
@@ -319,9 +381,12 @@ def list_components() -> None:
 		for gen_type in gen_choices:
 			console.print(f"  • {gen_type}")
 
-		console.print("\n[bold green]Available LLM Handlers:[/bold green]")
+		console.print("\n[bold green]Available LLM Handlers and Models:[/bold green]")
 		for llm_handler in llm_choices:
+			available_models = get_available_models(llm_handler)
 			console.print(f"  • {llm_handler}")
+			for model in available_models:
+				console.print(f"    - {model}")
 
 	except Exception as e:
 		console.print(f"[red]Failed to retrieve component list:[/red] {e}")
@@ -379,8 +444,35 @@ def interactive() -> None:
 
 		console.print(f"Selected LLM handler: [green]{llm}[/green]\n")
 
-		# 3. 파일 수 제한 설정
-		console.print("[cyan]3. Set file processing limit:[/cyan]")
+		# 3. 모델 선택
+		console.print("[cyan]3. Select model:[/cyan]")
+		available_models = get_available_models(llm)
+
+		# 기본 모델 사용 또는 사용자 선택
+		use_default_model = questionary.confirm(f"Use default model for {llm}?", default=True).ask()
+
+		if use_default_model is None:
+			console.print("[yellow]Operation cancelled.[/yellow]")
+			raise typer.Exit(0)
+
+		model = None
+		if not use_default_model and available_models:
+			model = questionary.select(
+				f"Choose a model for {llm}:",
+				choices=available_models,
+				default=available_models[0] if available_models else None
+			).ask()
+
+			if model is None:
+				console.print("[yellow]Operation cancelled.[/yellow]")
+				raise typer.Exit(0)
+
+			console.print(f"Selected model: [green]{model}[/green]\n")
+		else:
+			console.print(f"Using default model for {llm}\n")
+
+		# 4. 파일 수 제한 설정
+		console.print("[cyan]4. Set file processing limit:[/cyan]")
 		limit_files = questionary.confirm("Limiting the number of files?", default=False).ask()
 
 		if limit_files is None:
@@ -404,8 +496,8 @@ def interactive() -> None:
 		else:
 			console.print("All files will be processed.\n")
 
-		# 4. 자체 수정 모드 설정
-		console.print("[cyan]4. Configure self-correction mode:[/cyan]")
+		# 5. 자체 수정 모드 설정
+		console.print("[cyan]5. Configure self-correction mode:[/cyan]")
 		self_correction = questionary.confirm("Enable self-correction mode?", default=False).ask()
 
 		if self_correction is None:
@@ -414,8 +506,8 @@ def interactive() -> None:
 
 		console.print(f"Self-correction mode: [green]{'Enabled' if self_correction else 'Disabled'}[/green]\n")
 
-		# 5. 로그 레벨 설정
-		console.print("[cyan]5. Select log level:[/cyan]")
+		# 6. 로그 레벨 설정
+		console.print("[cyan]6. Select log level:[/cyan]")
 		log_levels = ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
 		log_level = questionary.select(
 			"Choose a log level:",
@@ -429,8 +521,8 @@ def interactive() -> None:
 
 		console.print(f"Selected log level: [green]{log_level}[/green]\n")
 
-		# 6. 프로그래스 바 설정
-		console.print("[cyan]6. Configure progress bar display:[/cyan]")
+		# 7. 프로그래스 바 설정
+		console.print("[cyan]7. Configure progress bar display:[/cyan]")
 		show_progress = questionary.confirm("Do you want to display the progress bar?", default=True).ask()
 
 		if show_progress is None:
@@ -439,7 +531,7 @@ def interactive() -> None:
 
 		console.print(f"Progress bar: [green]{'Show' if show_progress else 'Hide'}[/green]\n")
 
-		# 7. 설정 확인 및 실행
+		# 8. 설정 확인 및 실행
 		console.print("[yellow]Configuration Summary:[/yellow]")
 		summary_table = Table(show_header=False)
 		summary_table.add_column("Item", style="cyan")
@@ -447,6 +539,7 @@ def interactive() -> None:
 
 		summary_table.add_row("Dataset Type", dataset_type)
 		summary_table.add_row("LLM Handler", llm)
+		summary_table.add_row("Model", model if model else "Default")
 		summary_table.add_row("File Limit", str(num_files) if num_files else "No limit")
 		summary_table.add_row("Self-correction Mode", "Enabled" if self_correction else "Disabled")
 		summary_table.add_row("Log Level", log_level)
@@ -462,7 +555,7 @@ def interactive() -> None:
 			raise typer.Exit(0)
 		elif start_generation:
 			console.print("[bold green]Starting dataset generation...[/bold green]\n")
-			asyncio.run(_generate_async(dataset_type, llm, num_files, self_correction, log_level, show_progress))
+			asyncio.run(_generate_async(dataset_type, llm, model, num_files, self_correction, log_level, show_progress))
 		else:
 			console.print("[yellow]Operation cancelled.[/yellow]")
 

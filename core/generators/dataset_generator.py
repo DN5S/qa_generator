@@ -231,7 +231,7 @@ class DatasetGenerator(ABC):
 			response_text = await self.llm_handler.generate_async(prompt)
 			if response_text is None:
 				logger.error("Pipeline stopped: LLM response was None.")
-				return
+				raise RuntimeError("LLM API call failed - response was None")
 
 			# 4. 1차 응답 처리 (ResponseProcessor 위임)
 			validation_schema = self._get_validation_schema()
@@ -263,9 +263,11 @@ class DatasetGenerator(ABC):
 			logger.error("All processing attempts failed.")
 			output_path = self.file_handler.get_output_path(self.GENERATOR_TYPE, filepath.name, is_broken=True)
 			await self.file_handler.write_file_async(output_path, result.broken_text or response_text)
+			raise RuntimeError("All processing attempts failed - unable to generate valid output")
 
 		except Exception as e:
 			logger.critical(f"An unexpected critical error occurred during pipeline: {e}", exc_info=True)
+			raise
 		finally:
 			context_filename.reset(token)
 
