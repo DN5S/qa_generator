@@ -68,7 +68,7 @@ class ResponseProcessor:
 		try:
 			repaired_json_str = repair_json(response_text)
 			logger.debug(
-				f"Repaired JSON string:\n---REPAIRED JSON START---\n{repaired_json_str}\n---REPAIRED JSON END---")
+				f"Repaired JSON string:\n---REPAIRED JSON START---\n{repaired_json_str[:200]}\n---REPAIRED JSON END---")
 			validated_data = validation_schema.model_validate_json(repaired_json_str)
 			logger.info(f"Successfully repaired and validated JSON.")
 			return ProcessingResult(validated_data=validated_data)

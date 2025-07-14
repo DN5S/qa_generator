@@ -38,6 +38,7 @@ class GeminiHandler(BaseLLMHandler):
 			"""
 			Gemini API에 비동기적으로 요청을 보내고, 순수한 텍스트 응답을 반환한다.
 			API 호출 실패 시 설정된 횟수만큼 재시도한다.
+			토큰 사용량을 계산하고 로그에 기록한다.
 
 			Args:
 				prompt: Gemini API에 전달할 프롬프트.
@@ -46,6 +47,18 @@ class GeminiHandler(BaseLLMHandler):
 				API 호출 성공 시 응답 텍스트(str), 최종 실패 시 None.
 			"""
 			logger.debug(f"Sending prompt to Gemini API. Length: {len(prompt)} chars.")
+
+			# Count input tokens before API call
+			try:
+				input_token_count = await self.client.aio.models.count_tokens(
+					model=self.settings.llm.GEMINI_MODEL.value,
+					contents=prompt
+				)
+				logger.info(f"Input token count: {input_token_count.total_tokens}")
+			except Exception as e:
+				logger.warning(f"Failed to count input tokens: {e}")
+				input_token_count = None
+
 			async with self.semaphore:
 				last_error: Optional[Exception] = None
 				for attempt in range(self.settings.llm.API_RETRY_COUNT):
@@ -55,13 +68,22 @@ class GeminiHandler(BaseLLMHandler):
 						)
 
 						response: GenerateContentResponse = await self.client.aio.models.generate_content(
-							model=self.settings.llm.MODEL_NAME.value,
+							model=self.settings.llm.GEMINI_MODEL.value,
 							contents=prompt,
 							config=self.generation_config
 						)
 
 						if not response.text:
 							raise ValueError("API response is empty.")
+
+						# Log token usage metadata from response
+						if hasattr(response, 'usage_metadata') and response.usage_metadata:
+							usage = response.usage_metadata
+							logger.info(f"Token usage - Prompt: {usage.prompt_token_count}, "
+									   f"Candidates: {usage.candidates_token_count}, "
+									   f"Total: {usage.total_token_count}")
+						else:
+							logger.warning("No usage metadata available in response")
 
 						logger.info("Received response from Gemini API.")
 						return response.text
